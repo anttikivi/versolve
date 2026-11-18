@@ -25,7 +25,7 @@ Options:
     -B, --default-branch    Omit the branch name in version numbers for this branch
     -h, --help              Print this help message
     -C, --repository        Path to the Git repository root to inspect
-    -T, --tag-prefix        Ignore this prefix in version tag names
+    -T, --tag-prefix        Consider only tags with this prefix
     -v, --verbose           Print debug information
     --version               Print Versolve's version";
 
