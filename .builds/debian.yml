@@ -1,0 +1,23 @@
+# SPDX-FileCopyrightText: (C) 2026 Antti Kivi <antti@anttikivi.com>
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+---
+image: debian/stable
+
+sources:
+  - https://git.sr.ht/~anttikivi/versolve
+
+tasks:
+  - deps: |
+      curl -LsSf https://astral.sh/uv/install.sh | sudo env UV_UNMANAGED_INSTALL="/usr/local/bin" sh
+
+  - lint: |
+      cd versolve
+      cargo fmt --check
+      cargo xtask reuse
+      cargo clippy --all-targets
+
+  - test: |
+      cd versolve
+      cargo test

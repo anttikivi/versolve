@@ -20,6 +20,7 @@ fn run() -> Result {
         Some("reuse-annotate") => {
             reuse_annotate(&[
                 "--recursive",
+                ".builds",
                 "src",
                 "xtask/src",
                 ".cargo/config.toml",
