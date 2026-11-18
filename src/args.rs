@@ -65,9 +65,6 @@ where
                         _ => panic!("unexpected command-line option name: {name:?}"),
                     }
                 }
-                _ if name.starts_with("--") => {
-                    return Err(format!("unknown command-line argument: {name:?}"));
-                }
                 _ => return Err(format!("unknown command-line argument: {name:?}")),
             }
         } else if let Some(cluster) = s.strip_prefix('-').filter(|c| !c.is_empty()) {
@@ -102,7 +99,7 @@ where
 
 fn set_args_value<T>(field: &mut Option<T>, name: &str, val: T) -> Result<(), String> {
     if field.is_some() {
-        return Err(format!("option \"{name}\" is se twice"));
+        return Err(format!("option \"{name}\" is set twice"));
     }
 
     *field = Some(val);
@@ -131,5 +128,246 @@ fn no_value_flag(name: &str, inline_val: &Option<OsString>) -> Result<(), String
     match inline_val {
         None => Ok(()),
         Some(_) => Err(format!("option \"{name}\" does not take a value")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(argv: &[&str]) -> Result<Args, String> {
+        parse_args(argv.iter().map(OsString::from))
+    }
+
+    #[test]
+    fn no_args_returns_defaults() {
+        assert_eq!(parse(&[]), Ok(Args::default()));
+    }
+
+    #[test]
+    fn long_options_separate_value() {
+        let parsed = parse(&[
+            "--branch",
+            "feature",
+            "--default-branch",
+            "main",
+            "--repository",
+            "/tmp/repo",
+            "--tag-prefix",
+            "v",
+        ])
+        .unwrap();
+        assert_eq!(
+            parsed,
+            Args {
+                branch: Some("feature".into()),
+                default_branch: Some("main".into()),
+                repository: Some(PathBuf::from("/tmp/repo")),
+                tag_prefix: Some("v".into()),
+                ..Args::default()
+            }
+        );
+    }
+
+    #[test]
+    fn long_options_inline_values() {
+        let parsed = parse(&[
+            "--branch=feature",
+            "--default-branch=main",
+            "--repository=/tmp/repo",
+            "--tag-prefix=v",
+        ])
+        .unwrap();
+        assert_eq!(
+            parsed,
+            Args {
+                branch: Some("feature".into()),
+                default_branch: Some("main".into()),
+                repository: Some(PathBuf::from("/tmp/repo")),
+                tag_prefix: Some("v".into()),
+                ..Args::default()
+            }
+        );
+    }
+
+    #[test]
+    fn long_options_with_flags() {
+        let parsed = parse(&[
+            "--branch=feature",
+            "--default-branch=main",
+            "--repository=/tmp/repo",
+            "--help",
+            "--verbose=false",
+            "--tag-prefix=v",
+        ])
+        .unwrap();
+        assert_eq!(
+            parsed,
+            Args {
+                branch: Some("feature".into()),
+                default_branch: Some("main".into()),
+                help: Some(true),
+                repository: Some(PathBuf::from("/tmp/repo")),
+                tag_prefix: Some("v".into()),
+                verbose: Some(false),
+            }
+        );
+    }
+
+    #[test]
+    fn inline_value_may_contain_equals_sign() {
+        let args = parse(&["--branch=a=b"]).unwrap();
+        assert_eq!(args.branch.as_deref(), Some("a=b"));
+    }
+
+    #[test]
+    fn short_options_separate_and_attached() {
+        assert_eq!(
+            parse(&["-b", "main"]).unwrap().branch.as_deref(),
+            Some("main")
+        );
+        assert_eq!(parse(&["-bmain"]).unwrap().branch.as_deref(), Some("main"));
+        assert_eq!(
+            parse(&["-C/tmp/repo"]).unwrap().repository,
+            Some(PathBuf::from("/tmp/repo"))
+        );
+    }
+
+    #[test]
+    fn short_flags_options_with_trailing_value() {
+        let args = parse(&["-vbmain"]).unwrap();
+        assert_eq!(args.verbose, Some(true));
+        assert_eq!(args.branch.as_deref(), Some("main"));
+
+        let args = parse(&["-vb", "main"]).unwrap();
+        assert_eq!(args.branch.as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn boolean_flag_values() {
+        for (input, expected) in [
+            ("--verbose", true),
+            ("--verbose=true", true),
+            ("--verbose=1", true),
+            ("--verbose=false", false),
+            ("--verbose=0", false),
+            ("--no-verbose", false),
+        ] {
+            assert_eq!(parse(&[input]).unwrap().verbose, Some(expected), "{input}");
+        }
+        assert_eq!(parse(&["--help"]).unwrap().help, Some(true));
+    }
+
+    #[test]
+    fn boolean_flag_rejects_other_values() {
+        assert!(parse(&["--verbose=yes"]).is_err());
+        assert!(parse(&["--verbose="]).is_err());
+        assert!(parse(&["--no-verbose=true"]).is_err());
+    }
+
+    #[test]
+    fn duplicate_options_are_rejected() {
+        for argv in [
+            &["--branch", "a", "--branch", "b"][..],
+            &["--branch", "a", "-b", "b"],
+            &["-vv"],
+            &["-v", "--verbose"],
+            &["--verbose", "--no-verbose"],
+            &["-C", "a", "--repository", "b"],
+        ] {
+            assert!(parse(argv).is_err(), "{argv:?} should fail");
+        }
+    }
+
+    #[test]
+    fn missing_values_are_rejected() {
+        assert_eq!(
+            parse(&["--branch"]),
+            Err("option \"--branch\" requires a value".into())
+        );
+        assert_eq!(parse(&["-b"]), Err("option \"-b\" requires a value".into()));
+        assert!(parse(&["-vC"]).is_err());
+    }
+
+    #[test]
+    fn unknown_arguments_are_rejected() {
+        assert!(parse(&["--nope"]).is_err());
+        assert!(parse(&["-x"]).is_err());
+        assert!(parse(&["-vx"]).is_err());
+        assert!(parse(&["positional"]).is_err());
+        assert!(parse(&["-"]).is_err());
+    }
+
+    #[test]
+    fn double_dash() {
+        assert_eq!(parse(&["-v", "--"]).unwrap().verbose, Some(true));
+        assert!(parse(&["--", "extra"]).is_err());
+    }
+
+    #[test]
+    fn option_consumes_next_arg_even_if_it_looks_like_a_flag() {
+        assert_eq!(
+            parse(&["--branch", "--verbose"]).unwrap().branch.as_deref(),
+            Some("--verbose")
+        );
+    }
+
+    #[test]
+    fn empty_value_is_accepted() {
+        assert_eq!(parse(&["--branch="]).unwrap().branch.as_deref(), Some(""));
+    }
+
+    #[cfg(unix)]
+    mod non_utf8 {
+        use super::*;
+        use std::os::unix::ffi::OsStringExt;
+
+        fn bad() -> OsString {
+            OsString::from_vec(vec![0x66, 0x6f, 0xff]) // "fo\xFF"
+        }
+
+        #[test]
+        fn non_utf8_branch_is_rejected() {
+            let err = parse_args([OsString::from("--branch"), bad()]).unwrap_err();
+            assert!(err.contains("not valid UTF-8"));
+        }
+
+        #[test]
+        fn non_utf8_repository_path_is_accepted() {
+            let args = parse_args([OsString::from("-C"), bad()]).unwrap();
+            assert_eq!(args.repository, Some(PathBuf::from(bad())));
+        }
+
+        #[test]
+        fn non_utf8_argument_itself_is_rejected() {
+            assert!(parse_args([bad()]).is_err());
+        }
+    }
+
+    #[cfg(windows)]
+    mod non_utf8 {
+        use super::*;
+        use std::os::windows::ffi::OsStringExt;
+
+        fn bad() -> OsString {
+            OsString::from_wide(&[0x66, 0x6f, 0xD800])
+        }
+
+        #[test]
+        fn non_utf8_branch_is_rejected() {
+            let err = parse_args([OsString::from("--branch"), bad()]).unwrap_err();
+            assert!(err.contains("not valid UTF-8"));
+        }
+
+        #[test]
+        fn non_utf8_repository_path_is_accepted() {
+            let args = parse_args([OsString::from("-C"), bad()]).unwrap();
+            assert_eq!(args.repository, Some(PathBuf::from(bad())));
+        }
+
+        #[test]
+        fn non_utf8_argument_itself_is_rejected() {
+            assert!(parse_args([bad()]).is_err());
+        }
     }
 }
