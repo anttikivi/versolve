@@ -48,7 +48,7 @@ fn run(args: args::Args) -> io::Result<()> {
     }
 
     match resolve::from_git(&opts) {
-        Ok(_) => {}
+        Ok(v) => println!("{v}"),
         Err(s) => eprintln!("failed to resolve version: {s}"),
     }
 
