@@ -6,21 +6,16 @@
 image: openbsd/latest
 
 packages:
-  - rustup
+  - rust
+  - rust-clippy
 
 sources:
   - https://git.sr.ht/~anttikivi/versolve
 
 tasks:
-  - deps: |
-      curl -LsSf https://astral.sh/uv/install.sh | sudo env UV_UNMANAGED_INSTALL="/usr/local/bin" sh
-      rustup default stable
-
   - lint: |
       cd versolve
-      cargo fmt --check
-      cargo xtask reuse
-      cargo clippy --all-targets
+      cargo clippy --all-targets -- -D warnings
 
   - test: |
       cd versolve

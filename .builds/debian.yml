@@ -20,7 +20,7 @@ tasks:
       cd versolve
       cargo fmt --check
       cargo xtask reuse
-      cargo clippy --all-targets
+      cargo clippy --all-targets -- -D warnings
 
   - test: |
       cd versolve
