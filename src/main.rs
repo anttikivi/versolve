@@ -18,7 +18,7 @@ fn main() -> ExitCode {
         },
         Err(s) => {
             eprintln!("failed to parse command-line arguments: {s}");
-            ExitCode::FAILURE
+            ExitCode::from(2)
         }
     }
 }
