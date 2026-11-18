@@ -4,10 +4,11 @@
 
 [package]
 name = "versolve"
-version = "0.1.0"
+version = "0.1.0-dev"
 edition = "2024"
 
 [workspace]
 members = [".", "xtask"]
 
 [dependencies]
+git2 = { version = "0.21.0" }
