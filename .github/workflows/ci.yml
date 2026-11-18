@@ -1,0 +1,29 @@
+# SPDX-FileCopyrightText: (C) 2026 Antti Kivi <antti@anttikivi.com>
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+---
+name: ci
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - macos-latest
+          - ubuntu-latest
+          - windows-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test

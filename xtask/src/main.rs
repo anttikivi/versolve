@@ -21,6 +21,7 @@ fn run() -> Result {
             reuse_annotate(&[
                 "--recursive",
                 ".builds",
+                ".github",
                 "src",
                 "xtask/src",
                 ".cargo/config.toml",
