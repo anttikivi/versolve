@@ -5,12 +5,16 @@
 ---
 image: debian/stable
 
+packages:
+  - rustup
+
 sources:
   - https://git.sr.ht/~anttikivi/versolve
 
 tasks:
   - deps: |
       curl -LsSf https://astral.sh/uv/install.sh | sudo env UV_UNMANAGED_INSTALL="/usr/local/bin" sh
+      rustup default stable
 
   - lint: |
       cd versolve
