@@ -13,3 +13,6 @@ members = [".", "xtask"]
 [dependencies]
 git2 = { version = "0.21.0" }
 semver = "1.0.28"
+
+[dev-dependencies]
+tempfile = "3.27.0"
