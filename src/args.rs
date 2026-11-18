@@ -14,6 +14,19 @@ pub struct Args {
     pub verbose: Option<bool>,
 }
 
+pub const USAGE: &str = "Resolve unique version number for Git revision
+
+Usage: versolve [options]
+
+Options:
+
+    -b, --branch            Manually override the current branch name
+    -B, --default-branch    Omit the branch name in version numbers for this branch
+    -h, --help              Print this help message
+    -C, --repository        Path to the Git repository root to inspect
+    -T, --tag-prefix        Ignore this prefix in version tag names
+    -v, --verbose           Print debug information";
+
 pub fn parse_args<I>(argv: I) -> Result<Args, String>
 where
     I: IntoIterator<Item = OsString>,
@@ -71,7 +84,7 @@ where
             for (i, c) in cluster.char_indices() {
                 match c {
                     'v' => set_args_value(&mut args.verbose, "-v", true)?,
-                    'b' | 'C' => {
+                    'b' | 'B' | 'C' | 'T' => {
                         let rest = &cluster[i + c.len_utf8()..];
                         let val = if rest.is_empty() {
                             it.next()
@@ -81,7 +94,11 @@ where
                         };
                         match c {
                             'b' => set_args_value(&mut args.branch, "-b", utf8("-b", val)?)?,
+                            'B' => {
+                                set_args_value(&mut args.default_branch, "-B", utf8("-B", val)?)?;
+                            }
                             'C' => set_args_value(&mut args.repository, "-C", PathBuf::from(val))?,
+                            'T' => set_args_value(&mut args.tag_prefix, "-T", utf8("-T", val)?)?,
                             _ => panic!("unexpected command-line option: \"-{c}\""),
                         }
                         break; // consumes the whole argument

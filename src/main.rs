@@ -27,5 +27,9 @@ fn run(args: args::Args) -> io::Result<()> {
         eprintln!("parsed command-line arguments: {args:#?}")
     }
 
+    if args.help.unwrap_or(false) {
+        println!("{}", args::USAGE);
+    }
+
     Ok(())
 }
