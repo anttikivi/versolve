@@ -21,13 +21,13 @@ Usage: versolve [options]
 
 Options:
 
-    -b, --branch            Manually override the current branch name
-    -B, --default-branch    Omit the branch name in version numbers for this branch
-    -h, --help              Print this help message
-    -C, --repository        Path to the Git repository root to inspect
-    -T, --tag-prefix        Consider only tags with this prefix
-    -v, --verbose           Print debug information
-    --version               Print Versolve's version";
+    -b, --branch <name>         Manually override the current branch name
+    -B, --default-branch <name> Omit the branch name in version numbers for this branch
+    -h, --help                  Print this help message
+    -C, --repository <path>     Path to the Git repository root to inspect
+    -T, --tag-prefix <prefix>   Consider only tags with this prefix
+    -v, --verbose               Print debug information
+    --version                   Print Versolve's version";
 
 pub fn parse_args<I>(argv: I) -> Result<Args, String>
 where
