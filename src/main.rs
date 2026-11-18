@@ -31,5 +31,10 @@ fn run(args: args::Args) -> io::Result<()> {
         println!("{}", args::USAGE);
     }
 
+    if args.version.unwrap_or(false) {
+        // TODO: Print the actual version.
+        println!("versolve 0.1.0-dev");
+    }
+
     Ok(())
 }

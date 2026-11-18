@@ -12,6 +12,7 @@ pub struct Args {
     pub repository: Option<PathBuf>,
     pub tag_prefix: Option<String>,
     pub verbose: Option<bool>,
+    pub version: Option<bool>,
 }
 
 pub const USAGE: &str = "Resolve unique version number for Git revision
@@ -25,7 +26,8 @@ Options:
     -h, --help              Print this help message
     -C, --repository        Path to the Git repository root to inspect
     -T, --tag-prefix        Ignore this prefix in version tag names
-    -v, --verbose           Print debug information";
+    -v, --verbose           Print debug information
+    --version               Print Versolve's version";
 
 pub fn parse_args<I>(argv: I) -> Result<Args, String>
 where
@@ -54,6 +56,7 @@ where
 
             match name {
                 "--help" => set_args_value(&mut args.help, name, flag(name, &inline_val)?)?,
+                "--version" => set_args_value(&mut args.version, name, flag(name, &inline_val)?)?,
                 "--verbose" => set_args_value(&mut args.verbose, name, flag(name, &inline_val)?)?,
                 "--no-verbose" => {
                     no_value_flag(name, &inline_val)?;
@@ -227,6 +230,7 @@ mod tests {
                 repository: Some(PathBuf::from("/tmp/repo")),
                 tag_prefix: Some("v".into()),
                 verbose: Some(false),
+                ..Args::default()
             }
         );
     }
