@@ -5,7 +5,7 @@
 mod args;
 mod resolve;
 
-use std::{env, io, process::ExitCode};
+use std::{env, process::ExitCode};
 
 fn main() -> ExitCode {
     match args::parse_args(env::args_os().skip(1)) {
@@ -23,7 +23,7 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(args: args::Args) -> io::Result<()> {
+fn run(args: args::Args) -> Result<(), Box<dyn std::error::Error>> {
     if args.verbose.unwrap_or(false) {
         // TODO: Use the actual version.
         eprintln!("running versolve 0.1.0-dev");
@@ -49,7 +49,9 @@ fn run(args: args::Args) -> io::Result<()> {
 
     match resolve::from_git(&opts) {
         Ok(v) => println!("{v}"),
-        Err(s) => eprintln!("failed to resolve version: {s}"),
+        Err(s) => {
+            return Err(format!("failed to resolve version: {s}").into());
+        }
     }
 
     Ok(())
