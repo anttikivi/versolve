@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: (C) 2026 Antti Kivi <antti@anttikivi.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use std::{env, ffi::OsString, io, path::PathBuf, process::ExitCode};
 
 struct Args {
