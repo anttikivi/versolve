@@ -8,7 +8,7 @@ use std::{
     path::PathBuf,
 };
 
-use git2::{ObjectType, Oid, Repository, Sort, StatusOptions};
+use git2::{ObjectType, Oid, Repository, StatusOptions};
 use semver::{BuildMetadata, Prerelease, Version};
 
 use crate::args::Args;
@@ -65,23 +65,28 @@ pub fn from_git(opts: &Options) -> Result<Version, Box<dyn std::error::Error>> {
     let head_commit = head_ref.peel(ObjectType::Commit)?;
     let head_oid = head_commit.id();
 
-    let mut it = repo.revwalk()?;
-    it.set_sorting(Sort::TOPOLOGICAL)?;
-    it.push(head_oid)?;
+    let mut walk = repo.revwalk()?;
+    walk.push(head_oid)?;
 
-    let mut distance: usize = 0;
     let mut base = None;
-    for oid in it {
+    for oid in walk {
         let oid = oid?;
-        if let Some(version) = tags.remove(&oid) {
-            base = Some(version);
-            break;
+        if let Some(v) = tags.remove(&oid)
+            && base.as_ref().is_none_or(|(_, b)| v > *b)
+        {
+            base = Some((oid, v));
         }
-        distance += 1;
     }
 
+    let mut walk = repo.revwalk()?;
+    walk.push(head_oid)?;
+    if let Some((oid, _)) = &base {
+        walk.hide(*oid)?;
+    }
+    let distance = walk.try_fold(0usize, |n, id| id.map(|_| n + 1))?;
+
     let mut version = match base {
-        Some(mut v) => {
+        Some((_, mut v)) => {
             if distance > 0 && v.pre.is_empty() {
                 v.patch += 1;
             }
@@ -478,5 +483,88 @@ mod tests {
             ..repo.options()
         };
         assert_version(&repo.resolve_with(&opts), "0.1.0-0.1.main");
+    }
+
+    #[test]
+    fn hotfix_branch_ignores_newer_tags() {
+        let repo = TestRepo::new();
+
+        repo.commit("commit");
+        repo.tag("1.5.0");
+        repo.commit("commit");
+        repo.tag("1.6.0");
+        repo.commit("commit");
+        repo.tag("2.0.0");
+        repo.commit("commit");
+
+        repo.git(&["checkout", "-b", "hotfix", "1.5.0"]);
+        repo.commit_many(2);
+        assert_version(&repo.resolve(), "1.5.1-0.2.hotfix");
+
+        repo.tag("1.5.1");
+        repo.commit("commit");
+        assert_version(&repo.resolve(), "1.5.2-0.1.hotfix");
+
+        repo.git(&["checkout", "main"]);
+        assert_version(&repo.resolve(), "2.0.1-0.1.main");
+    }
+
+    #[test]
+    fn merge_lower_tag_into_main() {
+        let repo = TestRepo::new();
+
+        repo.commit("commit");
+        repo.tag("1.5.0");
+
+        repo.git(&["checkout", "-b", "hotfix"]);
+        repo.commit("fix");
+        repo.tag("1.5.1");
+
+        repo.git(&["checkout", "main"]);
+        repo.commit("commit");
+        repo.tag("2.0.0");
+        repo.commit("commit");
+        assert_version(&repo.resolve(), "2.0.1-0.1.main");
+
+        repo.git(&["merge", "--no-ff", "-m", "merge hotfix", "hotfix"]);
+        assert_version(&repo.resolve(), "2.0.1-0.3.main");
+    }
+
+    #[test]
+    fn merge_higher_tag_into_hotfix_branch() {
+        let repo = TestRepo::new();
+
+        repo.commit("commit");
+        repo.tag("1.5.0");
+
+        repo.git(&["checkout", "-b", "hotfix"]);
+        repo.commit("fix");
+        repo.tag("1.5.1");
+        repo.commit("fix");
+
+        repo.git(&["checkout", "main"]);
+        repo.commit("commit");
+        repo.tag("2.0.0");
+
+        repo.git(&["checkout", "hotfix"]);
+        repo.git(&["merge", "--no-ff", "-m", "merge main", "main"]);
+        assert_version(&repo.resolve(), "2.0.1-0.3.hotfix");
+    }
+
+    #[test]
+    fn distance_counts_merged_commits() {
+        let repo = TestRepo::new();
+
+        repo.commit("commit");
+        repo.git(&["checkout", "-b", "side"]);
+        repo.commit_many(2);
+
+        repo.git(&["checkout", "main"]);
+        repo.commit("commit");
+        repo.tag("1.0.0");
+        repo.commit("commit");
+
+        repo.git(&["merge", "--no-ff", "-m", "merge side", "side"]);
+        assert_version(&repo.resolve(), "1.0.1-0.4.main");
     }
 }
