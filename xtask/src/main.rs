@@ -54,10 +54,7 @@ fn root() -> PathBuf {
 
 fn sh(prog: &str, args: &[&str]) -> Result {
     eprintln!("+ {prog} {}", args.join(" "));
-    let status = Command::new(&prog)
-        .args(args)
-        .current_dir(root())
-        .status()?;
+    let status = Command::new(prog).args(args).current_dir(root()).status()?;
     if !status.success() {
         return Err(format!("`{prog}` failed with {status}").into());
     }
