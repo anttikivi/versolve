@@ -20,12 +20,12 @@ fn run() -> Result {
         Some("reuse-annotate") => {
             reuse_annotate(&[
                 "--recursive",
-                ".builds",
                 ".github",
                 "src",
                 "xtask/src",
                 ".cargo/config.toml",
                 ".gitignore",
+                "build.rs",
                 "Cargo.toml",
                 "xtask/Cargo.toml",
             ])?;

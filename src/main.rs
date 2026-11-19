@@ -32,8 +32,11 @@ fn main() -> ExitCode {
 }
 
 fn run(args: args::Args) -> Result<(), Box<dyn std::error::Error>> {
-    // TODO: Use the actual version.
-    verbose!(args.verbose.unwrap_or(false), "running versolve 0.1.0-dev");
+    verbose!(
+        args.verbose.unwrap_or(false),
+        "running versolve {}",
+        env!("VERSOLVE_VERSION")
+    );
     verbose!(
         args.verbose.unwrap_or(false),
         "command-line arguments parsed: {args:?}"
@@ -45,8 +48,7 @@ fn run(args: args::Args) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if args.version.unwrap_or(false) {
-        // TODO: Print the actual version.
-        println!("versolve 0.1.0-dev");
+        println!("versolve {}", env!("VERSOLVE_VERSION"));
         return Ok(());
     }
 

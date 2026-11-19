@@ -25,5 +25,9 @@ members = [".", "xtask"]
 git2 = { version = "0.21.0", default-features = false }
 semver = "1.0.28"
 
+[build-dependencies]
+git2 = { version = "0.21.0", default-features = false }
+semver = "1.0.28"
+
 [dev-dependencies]
 tempfile = "=3.27.0"
