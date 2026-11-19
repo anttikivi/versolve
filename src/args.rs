@@ -92,6 +92,7 @@ where
         } else if let Some(cluster) = s.strip_prefix('-').filter(|c| !c.is_empty()) {
             for (i, c) in cluster.char_indices() {
                 match c {
+                    'h' => set_args_value(&mut args.help, "-h", true)?,
                     'v' => set_args_value(&mut args.verbose, "-v", true)?,
                     'b' | 'B' | 'C' | 'T' => {
                         let rest = &cluster[i + c.len_utf8()..];
@@ -289,6 +290,8 @@ mod tests {
             assert_eq!(parse(&[input]).unwrap().verbose, Some(expected), "{input}");
         }
         assert_eq!(parse(&["--help"]).unwrap().help, Some(true));
+        assert_eq!(parse(&["-h"]).unwrap().help, Some(true));
+        assert!(parse(&["-h", "--help"]).is_err());
     }
 
     #[test]
