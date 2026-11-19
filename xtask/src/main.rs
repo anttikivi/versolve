@@ -27,6 +27,7 @@ fn run() -> Result {
                 ".gitignore",
                 "build.rs",
                 "Cargo.toml",
+                "deny.toml",
                 "xtask/Cargo.toml",
             ])?;
             reuse_annotate(&["--force-dot-license", "Cargo.lock"])
