@@ -77,11 +77,16 @@ pub fn from_git(opts: &Options) -> Result<Version, Box<dyn std::error::Error>> {
     // A tag on the current commit is always used as is, even if a reachable tag has a higher
     // version.
     let mut base = tags.remove(&head_oid).map(|v| (head_oid, v));
-    if base.is_none() {
+    if base.is_none() && !tags.is_empty() {
         let mut walk = repo.revwalk()?;
         walk.push(head_oid)?;
 
         for oid in walk {
+            // Stop once every tag has been found. Tags that are not reachable from the current
+            // commit are never found, so with them the walk still visits the whole history.
+            if tags.is_empty() {
+                break;
+            }
             let oid = oid?;
             let Some(v) = tags.remove(&oid) else {
                 continue;
