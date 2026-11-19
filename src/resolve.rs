@@ -595,6 +595,49 @@ mod tests {
     }
 
     #[test]
+    fn subdirectory() {
+        let repo = TestRepo::new();
+
+        repo.commit("commit");
+        repo.tag("1.0.0");
+        fs::create_dir(repo.path().join("sub")).unwrap();
+        let opts = Options {
+            repository: repo.path().join("sub"),
+            ..repo.options()
+        };
+        assert_version(&repo.resolve_with(&opts), "1.0.0");
+    }
+
+    #[test]
+    fn bare_repository() {
+        let repo = TestRepo::new();
+
+        repo.commit("commit");
+        repo.tag("1.0.0");
+        repo.commit("commit");
+
+        let bare = TempDir::new().unwrap();
+        let bare_path = bare.path().to_str().unwrap();
+        repo.git(&["clone", "--bare", ".", bare_path]);
+
+        let opts = Options {
+            repository: bare.path().to_path_buf(),
+            ..repo.options()
+        };
+        let version = repo.resolve_with(&opts);
+        assert_version(&version, "1.0.1-0.1.main");
+        assert_clean(&version);
+    }
+
+    #[test]
+    fn no_commits() {
+        let repo = TestRepo::new();
+
+        let err = from_git(&repo.options()).unwrap_err();
+        assert_eq!(err.to_string(), "repository has no commits");
+    }
+
+    #[test]
     fn detached_head() {
         let repo = TestRepo::new();
 
