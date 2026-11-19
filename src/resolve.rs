@@ -44,9 +44,7 @@ impl TryFrom<Args> for Options {
 pub fn from_git(opts: &Options) -> Result<Version, Box<dyn std::error::Error>> {
     let repo = Repository::open(&opts.repository)?;
 
-    if opts.verbose {
-        eprintln!("opened repository at {:?}", repo.path());
-    }
+    verbose!(opts.verbose, "opened repository at {:?}", repo.path());
 
     let mut tags = collect_tags(
         &repo,
@@ -142,60 +140,57 @@ fn collect_tags(
     for reference in repo.references_glob("refs/tags/*")? {
         let reference = reference?;
         let Ok(tag) = reference.shorthand() else {
-            if verbose {
-                eprintln!(
-                    "skipping tag {:?}, name not valid UTF-8",
-                    String::from_utf8_lossy(reference.shorthand_bytes())
-                );
-            }
+            verbose!(
+                verbose,
+                "skipping tag {:?}, name not valid UTF-8",
+                String::from_utf8_lossy(reference.shorthand_bytes())
+            );
             continue;
         };
         let Some(name) = tag.strip_prefix(prefix) else {
-            if verbose {
-                eprintln!(
-                    "skipping tag {tag:?}, name does not start with the prefix \"{prefix:?}\""
-                );
-            }
+            verbose!(
+                verbose,
+                "skipping tag {tag:?}, name does not start with the prefix \"{prefix:?}\""
+            );
             continue;
         };
         let version = match Version::parse(name) {
             Ok(v) => v,
             Err(e) => {
-                if verbose {
-                    eprintln!("skipping tag {tag:?}, {name:?} is not a valid version number: {e}");
-                }
+                verbose!(
+                    verbose,
+                    "skipping tag {tag:?}, {name:?} is not a valid version number: {e}"
+                );
                 continue;
             }
         };
         let target = reference.peel(ObjectType::Any)?;
         let Some(commit) = target.as_commit() else {
-            if verbose {
-                eprintln!(
-                    "skipping tag {tag:?}, it points to {} instead of commit",
-                    target.kind().map_or("unknown object", |k| k.str())
-                );
-            }
+            verbose!(
+                verbose,
+                "skipping tag {tag:?}, it points to {} instead of commit",
+                target.kind().map_or("unknown object", |k| k.str())
+            );
             continue;
         };
-        if verbose {
-            eprintln!(
-                "found version {version} from tag {tag:?} on commit {}",
-                commit.id()
-            );
-        }
+        verbose!(
+            verbose,
+            "found version {version} from tag {tag:?} on commit {}",
+            commit.id()
+        );
         match tags.entry(commit.id()) {
             Entry::Occupied(mut entry) => {
                 if version > *entry.get() {
-                    if verbose {
-                        eprintln!(
-                            "version {version} replaces {} on commit {}",
-                            entry.get(),
-                            commit.id()
-                        );
-                    }
+                    verbose!(
+                        verbose,
+                        "version {version} replaces {} on commit {}",
+                        entry.get(),
+                        commit.id()
+                    );
                     entry.insert(version);
-                } else if verbose {
-                    eprintln!(
+                } else {
+                    verbose!(
+                        verbose,
                         "ignoring version {version}, commit {} already has {}",
                         commit.id(),
                         entry.get()

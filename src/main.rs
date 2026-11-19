@@ -2,6 +2,14 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+macro_rules! verbose {
+    ($enabled:expr, $($args:tt)*) => {
+        if $enabled {
+            eprintln!($($args)*);
+        }
+    };
+}
+
 mod args;
 mod resolve;
 
@@ -24,11 +32,12 @@ fn main() -> ExitCode {
 }
 
 fn run(args: args::Args) -> Result<(), Box<dyn std::error::Error>> {
-    if args.verbose.unwrap_or(false) {
-        // TODO: Use the actual version.
-        eprintln!("running versolve 0.1.0-dev");
-        eprintln!("command-line arguments parsed: {args:?}");
-    }
+    // TODO: Use the actual version.
+    verbose!(args.verbose.unwrap_or(false), "running versolve 0.1.0-dev");
+    verbose!(
+        args.verbose.unwrap_or(false),
+        "command-line arguments parsed: {args:?}"
+    );
 
     if args.help.unwrap_or(false) {
         println!("{}", args::USAGE);
@@ -43,9 +52,7 @@ fn run(args: args::Args) -> Result<(), Box<dyn std::error::Error>> {
 
     let opts = resolve::Options::try_from(args)?;
 
-    if opts.verbose {
-        eprintln!("options parsed: {opts:?}");
-    }
+    verbose!(opts.verbose, "options parsed: {opts:?}");
 
     match resolve::from_git(&opts) {
         Ok(v) => println!("{v}"),
