@@ -10,6 +10,7 @@ rust-version = "1.88.0"
 description = "Resolve unique semantic version numbers for Git revisions"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/anttikivi/versolve"
+exclude = [".cargo", ".github", "renovate.json"]
 
 [profile.release]
 strip = true
