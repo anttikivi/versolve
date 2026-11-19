@@ -46,6 +46,14 @@ pub fn from_git(opts: &Options) -> Result<Version, Box<dyn std::error::Error>> {
 
     verbose!(opts.verbose, "opened repository at {:?}", repo.path());
 
+    if repo.is_shallow() {
+        return Err(
+            "repository is a shallow clone and its history may be incomplete, fetch the full \
+            history with \"git fetch --unshallow --tags\""
+                .into(),
+        );
+    }
+
     let mut tags = collect_tags(
         &repo,
         opts.tag_prefix.as_deref().unwrap_or(""),
@@ -549,6 +557,30 @@ mod tests {
 
         repo.commit("commit");
         assert_version(&repo.resolve_with(&opts), "0.1.0-0.1");
+    }
+
+    #[test]
+    fn shallow_clone_is_rejected() {
+        let repo = TestRepo::new();
+
+        repo.commit_many(3);
+        repo.tag("1.0.0");
+        repo.commit("commit");
+
+        let clone = TempDir::new().unwrap();
+        let clone_path = clone.path().to_str().unwrap();
+        let repo_path = repo.path().to_str().unwrap();
+        repo.git(&["clone", "--no-local", "--depth=1", repo_path, clone_path]);
+
+        let opts = Options {
+            repository: clone.path().to_path_buf(),
+            ..repo.options()
+        };
+        let err = from_git(&opts).unwrap_err();
+        assert!(
+            err.to_string().contains("shallow"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]
