@@ -135,7 +135,7 @@ pub fn from_git(opts: &Options) -> Result<Version, Box<dyn std::error::Error>> {
     let status_opts = status_opts
         .include_untracked(true)
         .recurse_untracked_dirs(true);
-    let dirty = !repo.statuses(Some(status_opts))?.is_empty();
+    let dirty = !repo.is_bare() && !repo.statuses(Some(status_opts))?.is_empty();
 
     let short_id = head_commit.short_id()?;
     let short_id = short_id.as_str()?;
