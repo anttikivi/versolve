@@ -134,13 +134,21 @@ fn collect_tags(
 ) -> Result<HashMap<Oid, Version>, Box<dyn std::error::Error>> {
     let mut tags = HashMap::new();
 
-    for rf in repo.references_glob("refs/tags/*")? {
-        let rf = rf?;
-        let commit = rf.peel_to_commit()?;
-        let Some(name) = rf.shorthand()?.strip_prefix(prefix) else {
+    for reference in repo.references_glob("refs/tags/*")? {
+        let reference = reference?;
+        let Some(name) = reference
+            .shorthand()
+            .ok()
+            .and_then(|s| s.strip_prefix(prefix))
+        else {
             continue;
         };
-        let version = Version::parse(name)?;
+        let Ok(version) = Version::parse(name) else {
+            continue;
+        };
+        let Ok(commit) = reference.peel_to_commit() else {
+            continue;
+        };
         match tags.entry(commit.id()) {
             Entry::Occupied(mut entry) => {
                 if version > *entry.get() {
@@ -566,5 +574,109 @@ mod tests {
 
         repo.git(&["merge", "--no-ff", "-m", "merge side", "side"]);
         assert_version(&repo.resolve(), "1.0.1-0.4.main");
+    }
+
+    #[test]
+    fn lightweight_tags() {
+        let repo = TestRepo::new();
+
+        repo.commit("commit");
+        repo.git(&["tag", "1.0.0"]);
+        assert_version(&repo.resolve(), "1.0.0");
+
+        repo.commit("commit");
+        assert_version(&repo.resolve(), "1.0.1-0.1.main");
+    }
+
+    #[test]
+    fn non_version_tags_are_ignored() {
+        let repo = TestRepo::new();
+
+        repo.commit("commit");
+        repo.tag("release-2020");
+        repo.tag("latest");
+        assert_version(&repo.resolve(), "0.1.0-0.1.main");
+
+        repo.commit("commit");
+        repo.tag("1.0.0");
+        repo.tag("stable");
+        assert_version(&repo.resolve(), "1.0.0");
+    }
+
+    #[test]
+    fn invalid_versions_are_ignored() {
+        let repo = TestRepo::new();
+
+        repo.commit("commit");
+        repo.tag("1.0.0");
+        repo.commit("commit");
+        for name in ["2.0", "02.0.0", "2.0.0-rc.01", "2.0.0-", "2.0.0+", "v2.0.0"] {
+            repo.tag(name);
+        }
+        assert_version(&repo.resolve(), "1.0.1-0.1.main");
+    }
+
+    #[test]
+    fn prefixed_tags_require_tag_prefix() {
+        let repo = TestRepo::new();
+        let opts = Options {
+            tag_prefix: Some("v".into()),
+            ..repo.options()
+        };
+
+        repo.commit("commit");
+        repo.tag("v1.0.0");
+        assert_version(&repo.resolve(), "0.1.0-0.1.main");
+        assert_version(&repo.resolve_with(&opts), "1.0.0");
+    }
+
+    #[test]
+    fn prefixed_non_version_tags_are_ignored() {
+        let repo = TestRepo::new();
+        let opts = Options {
+            tag_prefix: Some("v".into()),
+            ..repo.options()
+        };
+
+        repo.commit("commit");
+        repo.tag("v1.0.0");
+        repo.commit("commit");
+        repo.tag("very-old");
+        repo.tag("vnext");
+        repo.tag("v2");
+        assert_version(&repo.resolve_with(&opts), "1.0.1-0.1.main");
+    }
+
+    #[test]
+    fn non_commit_tags_are_ignored() {
+        let repo = TestRepo::new();
+
+        repo.write_file("file.txt", "contents\n");
+        repo.commit_all("commit");
+        repo.tag("1.0.0");
+        repo.commit("commit");
+        repo.git(&["tag", "2.0.0", "HEAD^{tree}"]);
+        repo.git(&["tag", "-a", "3.0.0", "-m", "3.0.0", "HEAD^{tree}"]);
+        repo.git(&["tag", "-a", "4.0.0", "-m", "4.0.0", "HEAD:file.txt"]);
+        assert_version(&repo.resolve(), "1.0.1-0.1.main");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn non_utf8_tag_names_are_ignored() {
+        let repo = TestRepo::new();
+
+        repo.commit("commit");
+        repo.tag("1.0.0");
+        repo.commit("commit");
+        let oid = Repository::open(repo.path())
+            .unwrap()
+            .refname_to_id("HEAD")
+            .unwrap();
+        let mut line = format!("{oid} refs/tags/").into_bytes();
+        line.extend_from_slice(b"2.0.0\xff");
+        line.push(b'\n');
+        fs::write(repo.path().join(".git/packed-refs"), line).unwrap();
+        assert_version(&repo.resolve(), "1.0.1-0.1.main");
     }
 }
