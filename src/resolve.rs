@@ -53,17 +53,6 @@ pub fn from_git(opts: &Options) -> Result<Version, Box<dyn std::error::Error>> {
     )?;
 
     let head_ref = repo.head()?;
-    let branch = match opts.branch.as_deref() {
-        Some(s) => s,
-        None if head_ref.is_branch() => head_ref.shorthand()?,
-        None => {
-            return Err(format!(
-                "repository in detached HEAD in reference {}",
-                head_ref.name()?
-            )
-            .into());
-        }
-    };
     let head_commit = head_ref.peel(ObjectType::Commit)?;
     let head_oid = head_commit.id();
 
@@ -102,10 +91,29 @@ pub fn from_git(opts: &Options) -> Result<Version, Box<dyn std::error::Error>> {
             "" => format!("0.{distance}"),
             p => format!("{p}.0.{distance}"),
         };
+        let branch = match opts.branch.as_deref() {
+            Some(s) => s,
+            None if head_ref.is_branch() => head_ref.shorthand()?,
+            None => {
+                return Err(format!(
+                    "repository in detached HEAD in reference {}",
+                    head_ref.name()?
+                )
+                .into());
+            }
+        };
         if opts.default_branch.as_deref() != Some(branch) {
-            // TODO: Make sure the branch is a valid pre-release identifier.
             pre.push('.');
-            pre.push_str(branch);
+            if branch.bytes().all(|b| b.is_ascii_digit()) {
+                pre.push('b');
+            }
+            pre.extend(branch.chars().map(|c| {
+                if c.is_ascii_alphanumeric() || c == '-' {
+                    c
+                } else {
+                    '-'
+                }
+            }));
         }
         version.pre = Prerelease::new(&pre)?;
     }
@@ -505,6 +513,29 @@ mod tests {
 
         repo.commit("commit");
         assert_version(&repo.resolve_with(&opts), "0.1.0-0.1.branch");
+    }
+
+    #[test]
+    fn invalid_branch_characters() {
+        let repo = TestRepo::new();
+
+        repo.commit("commit");
+        for (branch, expected) in [
+            ("feature/x", "0.1.0-0.1.feature-x"),
+            ("my_branch", "0.1.0-0.1.my-branch"),
+            ("release.1", "0.1.0-0.1.release-1"),
+            ("123", "0.1.0-0.1.b123"),
+            ("007", "0.1.0-0.1.b007"),
+        ] {
+            let opts = Options {
+                branch: Some(branch.into()),
+                ..repo.options()
+            };
+            assert_version(&repo.resolve_with(&opts), expected);
+        }
+
+        repo.git(&["checkout", "-b", "feature/y"]);
+        assert_version(&repo.resolve(), "0.1.0-0.1.feature-y");
     }
 
     #[test]
