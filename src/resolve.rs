@@ -106,7 +106,9 @@ pub fn from_git(opts: &Options) -> Result<Version, Box<dyn std::error::Error>> {
     let mut version = match base {
         Some((_, mut v)) => {
             if distance > 0 && v.pre.is_empty() {
-                v.patch += 1;
+                v.patch = v.patch.checked_add(1).ok_or_else(|| {
+                    format!("cannot increment the patch version of {v}, it is the maximum value")
+                })?;
             }
             v
         }
@@ -489,6 +491,23 @@ mod tests {
 
         repo.commit_many(4);
         assert_version(&repo.resolve(), "1.2.4-rc.1.0.5.main");
+    }
+
+    #[test]
+    fn maximum_patch_version() {
+        let repo = TestRepo::new();
+
+        repo.commit("commit");
+        repo.tag("1.0.18446744073709551615");
+        assert_version(&repo.resolve(), "1.0.18446744073709551615");
+
+        repo.commit("commit");
+        let err = from_git(&repo.options()).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "cannot increment the patch version of 1.0.18446744073709551615, it is the maximum \
+            value"
+        );
     }
 
     #[test]
