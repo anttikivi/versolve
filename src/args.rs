@@ -68,7 +68,13 @@ where
                         .or_else(|| it.next())
                         .ok_or_else(|| format!("option \"{name}\" requires a value"))?;
                     match name {
-                        "--branch" => set_args_value(&mut args.branch, name, utf8(name, val)?)?,
+                        "--branch" => {
+                            let val = utf8(name, val)?;
+                            if val.is_empty() {
+                                return Err(format!("value for \"{name}\" cannot be empty"));
+                            }
+                            set_args_value(&mut args.branch, name, val)?
+                        }
                         "--default-branch" => {
                             set_args_value(&mut args.default_branch, name, utf8(name, val)?)?;
                         }
@@ -96,7 +102,13 @@ where
                             OsString::from(rest)
                         };
                         match c {
-                            'b' => set_args_value(&mut args.branch, "-b", utf8("-b", val)?)?,
+                            'b' => {
+                                let val = utf8("-b", val)?;
+                                if val.is_empty() {
+                                    return Err("value for \"-b\" cannot be empty".into());
+                                }
+                                set_args_value(&mut args.branch, "-b", val)?;
+                            }
                             'B' => {
                                 set_args_value(&mut args.default_branch, "-B", utf8("-B", val)?)?;
                             }
@@ -335,7 +347,17 @@ mod tests {
 
     #[test]
     fn empty_value_is_accepted() {
-        assert_eq!(parse(&["--branch="]).unwrap().branch.as_deref(), Some(""));
+        assert_eq!(
+            parse(&["--tag-prefix="]).unwrap().tag_prefix.as_deref(),
+            Some("")
+        );
+    }
+
+    #[test]
+    fn empty_branch_is_rejected() {
+        for argv in [&["--branch="][..], &["--branch", ""], &["-b", ""]] {
+            assert!(parse(argv).is_err(), "{argv:?} should fail");
+        }
     }
 
     #[cfg(unix)]

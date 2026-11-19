@@ -96,7 +96,7 @@ pub fn from_git(opts: &Options) -> Result<Version, Box<dyn std::error::Error>> {
             None if head_ref.is_branch() => head_ref.shorthand()?,
             None => {
                 return Err(format!(
-                    "repository in detached HEAD in reference {}",
+                    "HEAD is detached and at {}; pass \"--branch\" to name the branch",
                     head_ref.name()?
                 )
                 .into());
