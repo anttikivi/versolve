@@ -11,7 +11,7 @@ version:
 
 - No version tags: `0.1.0-0.<distance>.<branch>`.
 - Last tag is a pre-release version: `<tag version>.0.<distance>.<branch>`.
-- Last the is not a pre-release version:
+- Last tag is not a pre-release version:
   `<major>.<minor>.<patch + 1>-0.<distance>.<branch>`.
 
 You can set a default branch to Versolve, in which case the conflict-resolving
