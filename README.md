@@ -1,22 +1,114 @@
 # Versolve
 
-`versolve` is a small utility that can automatically resolve unique version
-numbers that follow [semantic versioning](https://semver.org/) for each source
-control revision in a Git repository. It uses tags for resolving the version
-numbers, and the version numbers are constructed and formatted in a way that is
-correctly ordered according to the versioning specification. It can use the tag
-for version number, and when the revision is "between" tags, it uses the
-commit's distance from the tag and it follows these rules to resolve the
-version:
+`versolve` resolves a unique version number that follows
+[semantic versioning](https://semver.org/) for every revision of a Git
+repository. It takes the version from the repository's tags, and for commits
+between tags it builds a pre-release version from the commit's distance to the
+latest tag. The resolved version numbers are ordered according to semantic
+versioning precedence rules so that later revisions always get a higher version.
 
-- No version tags: `0.1.0-0.<distance>.<branch>`.
-- Last tag is a pre-release version: `<tag version>.0.<distance>.<branch>`.
-- Last tag is not a pre-release version:
+## Installation
+
+```sh
+cargo install versolve
+```
+
+Building Versolve requires Rust 1.88.0 or later.
+
+## Usage
+
+Run Versolve in a repository. It prints the resolved version to the standard
+output.
+
+```console
+$ versolve --tag-prefix v --default-branch main
+1.2.4-0.3+g1a2b3c4
+```
+
+| Option                          | Description                                          |
+| ------------------------------- | ---------------------------------------------------- |
+| `-b`, `--branch <name>`         | Use this branch name instead of the current branch   |
+| `-B`, `--default-branch <name>` | Omit the branch name from versions on this branch    |
+| `-C`, `--repository <path>`     | Resolve the version for this repository              |
+| `-T`, `--tag-prefix <prefix>`   | Consider only tags with this prefix, for example `v` |
+| `-v`, `--verbose`               | Print debug information to standard error            |
+| `-h`, `--help`                  | Print the help message                               |
+| `--version`                     | Print the version of Versolve                        |
+
+Versolve exits with status 0 on success, 1 if the version cannot be resolved,
+and 2 if the command-line arguments are invalid.
+
+### How the version is resolved
+
+Versolve finds the highest version tag that is reachable from the current
+commit. A tag is a version tag if its name, after removing the prefix given with
+`--tag-prefix`, is a valid semantic version number. All other tags are ignored.
+Note that this means tags like `v1.2.3` are only used if you pass
+`--tag-prefix v`.
+
+The distance is the number of commits that are reachable from the current commit
+but not from the tag, the same number that `git describe` reports. The version
+is then resolved with these rules:
+
+- The current commit is tagged: the version of the tag.
+- The latest tag is a release version:
   `<major>.<minor>.<patch + 1>-0.<distance>.<branch>`.
+- The latest tag is a pre-release version:
+  `<tag version>.0.<distance>.<branch>`.
+- There are no version tags: `0.1.0-0.<distance>.<branch>`.
 
-You can set a default branch to Versolve, in which case the conflict-resolving
-`<branch>` identifier is omitted when the version number is resolved for the set
-default branch.
+For example, with `--tag-prefix v --default-branch main`:
+
+| Revision                                       | Version                            |
+| ---------------------------------------------- | ---------------------------------- |
+| Two commits, no tags                           | `0.1.0-0.2+g1a2b3c4`               |
+| Tagged `v1.2.3`                                | `1.2.3+g1a2b3c4`                   |
+| Three commits after `v1.2.3` on `main`         | `1.2.4-0.3+g1a2b3c4`               |
+| Five commits after `v1.2.3` on `feature/login` | `1.2.4-0.5.feature-login+g1a2b3c4` |
+| Two commits after `v2.0.0-rc.1` on `main`      | `2.0.0-rc.1.0.2+g1a2b3c4`          |
+
+A development version always sorts after the tag it is based on and before any
+later release: `1.2.3` < `1.2.4-0.3` < `1.2.4-0.4` < `1.2.4`, and `2.0.0-rc.1` <
+`2.0.0-rc.1.0.2` < `2.0.0-rc.2`.
+
+### Branches
+
+The branch name keeps the versions of commits on different branches unique. Use
+`--default-branch` to leave it out on your main branch.
+
+Characters that are not allowed in a pre-release identifier, that is anything
+other than ASCII letters, digits, and `-`, are replaced with `-`, so
+`feature/example` becomes `feature-example`. A branch name with only digits is
+prefixed with `b`. Because of this, different branch names can produce the same
+identifier, for example `feature/example` and `feature-example`.
+
+If `HEAD` is detached and the current commit is not tagged, pass the branch name
+with `--branch`.
+
+### Build metadata
+
+The build metadata contains `g` followed by the abbreviated commit ID. If the
+working tree has uncommitted changes, including untracked files that are not
+ignored, `.dirty` is appended to it, for example `1.2.4-0.3+g1a2b3c4.dirty`.
+Build metadata does not affect the ordering of the versions.
+
+### GitHub Actions
+
+Versolve needs the full history and the tags of the repository. It refuses to
+run in a shallow clone. Partial clones, such as ones made with
+`--filter=blob:none`, work. A clone without tags cannot be detected and resolves
+to a `0.1.0` pre-release, so make sure the tags are fetched.
+
+With GitHub Actions, check out the repository and pass the branch name, as pull
+requests are checked out with a detached `HEAD`:
+
+```yaml
+- uses: actions/checkout@v7
+  with:
+    fetch-depth: 0
+    filter: blob:none
+- run: versolve -T v -B main -b "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}"
+```
 
 ## License
 
