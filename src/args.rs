@@ -27,6 +27,7 @@ Options:
     -C, --repository <path>     Path to the Git repository to inspect
     -T, --tag-prefix <prefix>   Consider only tags with this prefix
     -v, --verbose               Print debug information
+    --no-verbose                Do not print debug information
     --version                   Print Versolve's version";
 
 pub fn parse_args<I>(argv: I) -> Result<Args, String>
