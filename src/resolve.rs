@@ -171,7 +171,7 @@ fn collect_tags(
         let Some(name) = tag.strip_prefix(prefix) else {
             verbose!(
                 verbose,
-                "skipping tag {tag:?}, name does not start with the prefix \"{prefix:?}\""
+                "skipping tag {tag:?}, name does not start with the prefix {prefix:?}"
             );
             continue;
         };
