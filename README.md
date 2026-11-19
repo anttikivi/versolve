@@ -40,11 +40,13 @@ and 2 if the command-line arguments are invalid.
 
 ### How the version is resolved
 
-Versolve finds the highest version tag that is reachable from the current
-commit. A tag is a version tag if its name, after removing the prefix given with
-`--tag-prefix`, is a valid semantic version number. All other tags are ignored.
-Note that this means tags like `v1.2.3` are only used if you pass
-`--tag-prefix v`.
+If the current commit has a version tag, Versolve uses it. Otherwise it finds
+the highest version tag that is reachable from the current commit. Build
+metadata does not affect which tag is the highest, and of tags with equal
+precedence the one closest to the current commit is used. A tag is a version tag
+if its name, after removing the prefix given with `--tag-prefix`, is a valid
+semantic version number. All other tags are ignored. Note that this means tags
+like `v1.2.3` are only used if you pass `--tag-prefix v`.
 
 The distance is the number of commits that are reachable from the current commit
 but not from the tag, the same number that `git describe` reports. The version
@@ -70,6 +72,12 @@ For example, with `--tag-prefix v --default-branch main`:
 A development version always sorts after the tag it is based on and before any
 later release: `1.2.3` < `1.2.4-0.3` < `1.2.4-0.4` < `1.2.4`, and `2.0.0-rc.1` <
 `2.0.0-rc.1.0.2` < `2.0.0-rc.2`.
+
+This ordering holds as long as each new tag has a higher version than the tags
+it is based on and the first version tag is at least `0.1.0`. Versolve does not
+check this. For example, tagging a commit `0.0.1` after untagged commits that
+resolved to `0.1.0-0.<distance>` gives that commit a lower version than its
+parent.
 
 ### Branches
 

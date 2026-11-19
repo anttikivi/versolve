@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use std::{
+    cmp::Ordering,
     collections::{HashMap, hash_map::Entry},
     env, io,
     path::PathBuf,
@@ -69,16 +70,29 @@ pub fn from_git(opts: &Options) -> Result<Version, Box<dyn std::error::Error>> {
     let head_commit = head_ref.peel(ObjectType::Commit)?;
     let head_oid = head_commit.id();
 
-    let mut walk = repo.revwalk()?;
-    walk.push(head_oid)?;
+    // A tag on the current commit is always used as is, even if a reachable tag has a higher
+    // version.
+    let mut base = tags.remove(&head_oid).map(|v| (head_oid, v));
+    if base.is_none() {
+        let mut walk = repo.revwalk()?;
+        walk.push(head_oid)?;
 
-    let mut base = None;
-    for oid in walk {
-        let oid = oid?;
-        if let Some(v) = tags.remove(&oid)
-            && base.as_ref().is_none_or(|(_, b)| v > *b)
-        {
-            base = Some((oid, v));
+        for oid in walk {
+            let oid = oid?;
+            let Some(v) = tags.remove(&oid) else {
+                continue;
+            };
+            let replace = match &base {
+                None => true,
+                Some((base_oid, b)) => match v.cmp_precedence(b) {
+                    Ordering::Greater => true,
+                    Ordering::Equal => repo.graph_descendant_of(oid, *base_oid)?,
+                    Ordering::Less => false,
+                },
+            };
+            if replace {
+                base = Some((oid, v));
+            }
         }
     }
 
@@ -412,6 +426,34 @@ mod tests {
         repo.commit_many(15);
         repo.tag("1.3.0-rc.3");
         assert_version(&repo.resolve(), "1.3.0-rc.3");
+    }
+
+    #[test]
+    fn exact_tag_below_reachable_tag() {
+        let repo = TestRepo::new();
+
+        repo.commit("commit");
+        repo.tag("0.0.1");
+        repo.commit("commit");
+        repo.tag("0.0.0");
+        assert_version(&repo.resolve(), "0.0.0");
+
+        repo.git(&["checkout", "--detach", "0.0.0"]);
+        assert_version(&repo.resolve(), "0.0.0");
+    }
+
+    #[test]
+    fn build_metadata_does_not_affect_base() {
+        let repo = TestRepo::new();
+
+        repo.commit("commit");
+        repo.tag("1.0.0+z");
+        repo.commit("commit");
+        repo.tag("1.0.0+a");
+        assert_version(&repo.resolve(), "1.0.0");
+
+        repo.commit("commit");
+        assert_version(&repo.resolve(), "1.0.1-0.1.main");
     }
 
     #[test]
