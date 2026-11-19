@@ -17,6 +17,8 @@ jobs:
   build:
     name: ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    env:
+      VERSOLVE_BUILD_BRANCH: ${{ github.head_ref || github.ref_name }}
     strategy:
       fail-fast: false
       matrix:
@@ -34,7 +36,14 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo build --workspace
       - run: cargo test --workspace
-      - run: ./target/debug/versolve --verbose --version
+      - name: Check the embedded version
+        shell: bash
+        run: |
+          embedded="$(./target/debug/versolve --verbose --version)"
+          resolved="versolve $(./target/debug/versolve -T v -B master -b "${VERSOLVE_BUILD_BRANCH}")"
+          echo "embedded: ${embedded}"
+          echo "resolved: ${resolved}"
+          test "${embedded}" = "${resolved}"
   deny:
     name: deny
     runs-on: ubuntu-latest

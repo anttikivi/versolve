@@ -17,6 +17,9 @@ use crate::args::Args;
 #[derive(Debug)]
 pub struct Options {
     pub verbose: bool,
+    /// Whether to append `.dirty` to the build metadata if the working tree has uncommitted
+    /// changes.
+    pub check_dirty: bool,
     branch: Option<String>,
     default_branch: Option<String>,
     repository: PathBuf,
@@ -34,6 +37,7 @@ impl TryFrom<Args> for Options {
 
         Ok(Self {
             branch: value.branch,
+            check_dirty: true,
             default_branch: value.default_branch,
             repository,
             tag_prefix: value.tag_prefix,
@@ -150,7 +154,8 @@ pub fn from_git(opts: &Options) -> Result<Version, Box<dyn std::error::Error>> {
     let status_opts = status_opts
         .include_untracked(true)
         .recurse_untracked_dirs(true);
-    let dirty = !repo.is_bare() && !repo.statuses(Some(status_opts))?.is_empty();
+    let dirty =
+        opts.check_dirty && !repo.is_bare() && !repo.statuses(Some(status_opts))?.is_empty();
 
     let short_id = head_commit.short_id()?;
     let short_id = short_id.as_str()?;
@@ -271,6 +276,7 @@ mod tests {
         fn options(&self) -> Options {
             Options {
                 verbose: false,
+                check_dirty: true,
                 branch: None,
                 default_branch: None,
                 repository: self.path().to_path_buf(),
@@ -545,6 +551,20 @@ mod tests {
         let version = repo.resolve();
         assert_version(&version, "1.1.2-0.1.main");
         assert_dirty(&version);
+    }
+
+    #[test]
+    fn dirty_check_disabled() {
+        let repo = TestRepo::new();
+        let opts = Options {
+            check_dirty: false,
+            ..repo.options()
+        };
+
+        repo.commit("commit");
+        repo.make_dirty();
+        let version = repo.resolve_with(&opts);
+        assert_eq!(version.build.as_str(), format!("g{}", repo.short_head_id()));
     }
 
     #[test]

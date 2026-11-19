@@ -15,6 +15,12 @@ cargo install versolve
 
 Building Versolve requires Rust 1.88.0 or later.
 
+When built from a Git checkout, Versolve resolves its own version from the
+committed state of the repository, so the version never has `.dirty` in it. If
+`HEAD` is detached, set the branch name with the `VERSOLVE_BUILD_BRANCH`
+environment variable. If the version cannot be resolved, the version from
+`Cargo.toml` is used.
+
 ## Usage
 
 Run Versolve in a repository. It prints the resolved version to the standard

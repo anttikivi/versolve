@@ -29,21 +29,22 @@ fn main() {
     // directory.
     let version = match Repository::open(root) {
         Ok(repo) => {
-            for path in ["HEAD", "index"] {
-                println!(
-                    "cargo::rerun-if-changed={}",
-                    repo.path().join(path).display()
-                );
-            }
+            // The embedded version depends only on the committed state, so changes to the working
+            // tree don't need to be tracked.
+            println!(
+                "cargo::rerun-if-changed={}",
+                repo.path().join("HEAD").display()
+            );
             for path in ["refs", "packed-refs"] {
                 println!(
                     "cargo::rerun-if-changed={}",
                     repo.commondir().join(path).display()
                 );
             }
-            for path in ["src", "build.rs", "Cargo.toml", "Cargo.lock"] {
+            for path in ["build.rs", "Cargo.toml"] {
                 println!("cargo::rerun-if-changed={path}");
             }
+            println!("cargo::rerun-if-env-changed=VERSOLVE_BUILD_BRANCH");
             resolve_version(root).unwrap_or_else(|e| {
                 println!("cargo::warning=failed to resolve version: {e}");
                 env::var("CARGO_PKG_VERSION").unwrap()
@@ -56,11 +57,15 @@ fn main() {
 }
 
 fn resolve_version(root: &Path) -> Result<String, Box<dyn Error>> {
-    let opts = resolve::Options::try_from(args::Args {
+    let mut opts = resolve::Options::try_from(args::Args {
+        branch: env::var("VERSOLVE_BUILD_BRANCH")
+            .ok()
+            .filter(|b| !b.is_empty()),
         default_branch: Some("master".into()),
         repository: Some(root.to_path_buf()),
         tag_prefix: Some("v".into()),
         ..Default::default()
     })?;
+    opts.check_dirty = false;
     Ok(resolve::from_git(&opts)?.to_string())
 }
