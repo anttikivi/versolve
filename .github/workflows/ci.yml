@@ -7,6 +7,7 @@ name: ci
 
 on:
   push:
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -34,3 +35,16 @@ jobs:
       - run: cargo build --workspace
       - run: cargo test --workspace
       - run: ./target/debug/versolve --version
+  deny:
+    name: deny
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        checks:
+          - advisories
+          - bans licenses sources
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: EmbarkStudios/cargo-deny-action@17aeb3c839e42274e2b8adf721c8c65edfdc74dd
+        with:
+          command: check ${{ matrix.checks }}
