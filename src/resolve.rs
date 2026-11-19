@@ -264,7 +264,13 @@ mod tests {
         }
 
         fn git(&self, args: &[&str]) {
-            let output = Command::new("git")
+            let mut cmd = Command::new("git");
+            for (key, _) in env::vars_os() {
+                if key.to_str().is_some_and(|k| k.starts_with("GIT_")) {
+                    cmd.env_remove(key);
+                }
+            }
+            let output = cmd
                 .env("GIT_CONFIG_GLOBAL", "/dev/null")
                 .env("GIT_CONFIG_NOSYSTEM", "1")
                 .args(["-c", "user.name=Test", "-c", "user.email=test@example.com"])
