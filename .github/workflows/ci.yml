@@ -34,7 +34,7 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo build --workspace
       - run: cargo test --workspace
-      - run: ./target/debug/versolve --version
+      - run: ./target/debug/versolve --verbose --version
   deny:
     name: deny
     runs-on: ubuntu-latest
