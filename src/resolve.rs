@@ -42,7 +42,7 @@ impl TryFrom<Args> for Options {
 }
 
 pub fn from_git(opts: &Options) -> Result<Version, Box<dyn std::error::Error>> {
-    let repo = Repository::open(&opts.repository)?;
+    let repo = Repository::discover(&opts.repository)?;
 
     verbose!(opts.verbose, "opened repository at {:?}", repo.path());
 

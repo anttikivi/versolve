@@ -24,7 +24,7 @@ Options:
     -b, --branch <name>         Manually override the current branch name
     -B, --default-branch <name> Omit the branch name in version numbers for this branch
     -h, --help                  Print this help message
-    -C, --repository <path>     Path to the Git repository root to inspect
+    -C, --repository <path>     Path to the Git repository to inspect
     -T, --tag-prefix <prefix>   Consider only tags with this prefix
     -v, --verbose               Print debug information
     --version                   Print Versolve's version";
