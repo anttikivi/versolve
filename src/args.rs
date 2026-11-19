@@ -84,7 +84,7 @@ where
                         "--tag-prefix" => {
                             set_args_value(&mut args.tag_prefix, name, utf8(name, val)?)?;
                         }
-                        _ => panic!("unexpected command-line option name: {name:?}"),
+                        _ => unreachable!(),
                     }
                 }
                 _ => return Err(format!("unknown command-line argument: {name:?}")),
@@ -115,7 +115,7 @@ where
                             }
                             'C' => set_args_value(&mut args.repository, "-C", PathBuf::from(val))?,
                             'T' => set_args_value(&mut args.tag_prefix, "-T", utf8("-T", val)?)?,
-                            _ => panic!("unexpected command-line option: \"-{c}\""),
+                            _ => unreachable!(),
                         }
                         break; // consumes the whole argument
                     }
