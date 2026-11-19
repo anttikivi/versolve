@@ -8,7 +8,7 @@ use std::{
     path::PathBuf,
 };
 
-use git2::{ObjectType, Oid, Repository, StatusOptions};
+use git2::{ErrorCode, ObjectType, Oid, Repository, StatusOptions};
 use semver::{BuildMetadata, Prerelease, Version};
 
 use crate::args::Args;
@@ -60,7 +60,12 @@ pub fn from_git(opts: &Options) -> Result<Version, Box<dyn std::error::Error>> {
         opts.verbose,
     )?;
 
-    let head_ref = repo.head()?;
+    let head_ref = match repo.head() {
+        Err(e) if e.code() == ErrorCode::UnbornBranch => {
+            return Err("repository has no commits".into());
+        }
+        head => head?,
+    };
     let head_commit = head_ref.peel(ObjectType::Commit)?;
     let head_oid = head_commit.id();
 
