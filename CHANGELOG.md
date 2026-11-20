@@ -17,8 +17,8 @@ and this project adheres to
 - Check for uncommitted changes without listing every file in untracked
   directories, which makes the check faster when the working tree has large
   untracked directories.
-- Stop searching for the latest version tag once no tag with a higher version
-  is left instead of searching for every version tag, which makes resolving the
+- Stop searching for the latest version tag once no tag with a higher version is
+  left instead of searching for every version tag, which makes resolving the
   version much faster in repositories with long histories.
 - Explain how to fix a version tag that points to an object missing from the
   repository instead of only reporting that the tag cannot be peeled.
@@ -31,6 +31,9 @@ and this project adheres to
 - Report that the current branch has no commits instead of the whole repository,
   as the repository may have commits on other branches, for example after
   `git checkout --orphan`.
+- Accept a repository path that is not valid UTF-8 when it is attached to the
+  option, as in `-C<path>` and `--repository=<path>`, and not only when it is
+  given as a separate argument.
 
 ## [0.1.0] - 2026-11-20
 

@@ -2,7 +2,10 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::{ffi::OsString, path::PathBuf};
+use std::{
+    ffi::{OsStr, OsString},
+    path::PathBuf,
+};
 
 #[derive(Debug, Default, PartialEq)]
 pub struct Args {
@@ -38,21 +41,27 @@ where
     let mut it = argv.into_iter();
 
     while let Some(arg) = it.next() {
-        let Some(s) = arg.to_str() else {
-            return Err(format!("unknown command-line argument: {arg:?}"));
-        };
+        // Only the option names need to be valid UTF-8. Look at the encoded bytes so that values
+        // attached to the options like "-C<path>" don't need to be.
+        let bytes = arg.as_encoded_bytes();
 
-        if s == "--" {
+        if bytes == b"--" {
             return match it.next() {
                 Some(extra) => Err(format!("unexpected argument: {extra:?}")),
                 None => Ok(args),
             };
         }
 
-        if s.starts_with("--") {
-            let (name, mut inline_val) = match s.split_once('=') {
-                Some((n, v)) => (n, Some(OsString::from(v))),
-                None => (s, None),
+        if bytes.starts_with(b"--") {
+            let (name, mut inline_val) = match bytes.iter().position(|&b| b == b'=') {
+                Some(i) => {
+                    let (n, v) = split_at_ascii(&arg, i);
+                    (n, Some(v.to_os_string()))
+                }
+                None => (arg.as_os_str(), None),
+            };
+            let Some(name) = name.to_str() else {
+                return Err(format!("unknown command-line argument: {arg:?}"));
             };
 
             match name {
@@ -90,18 +99,20 @@ where
                 }
                 _ => return Err(format!("unknown command-line argument: {name:?}")),
             }
-        } else if let Some(cluster) = s.strip_prefix('-').filter(|c| !c.is_empty()) {
-            for (i, c) in cluster.char_indices() {
+        } else if let Some(cluster) = bytes.strip_prefix(b"-").filter(|c| !c.is_empty()) {
+            for (i, &c) in cluster.iter().enumerate() {
                 match c {
-                    'h' => set_args_value(&mut args.help, "-h", true)?,
-                    'v' => set_args_value(&mut args.verbose, "-v", true)?,
-                    'b' | 'B' | 'C' | 'T' => {
-                        let rest = &cluster[i + c.len_utf8()..];
+                    b'h' => set_args_value(&mut args.help, "-h", true)?,
+                    b'v' => set_args_value(&mut args.verbose, "-v", true)?,
+                    b'b' | b'B' | b'C' | b'T' => {
+                        let c = char::from(c);
+                        // The option is at index i + 1 of the argument because of the "-".
+                        let (_, rest) = split_at_ascii(&arg, i + 1);
                         let val = if rest.is_empty() {
                             it.next()
                                 .ok_or_else(|| format!("option \"-{c}\" requires a value"))?
                         } else {
-                            OsString::from(rest)
+                            rest.to_os_string()
                         };
                         match c {
                             'b' => {
@@ -120,15 +131,38 @@ where
                         }
                         break; // consumes the whole argument
                     }
-                    _ => return Err(format!("unknown option: -{c}")),
+                    _ => {
+                        let c = String::from_utf8_lossy(&cluster[i..]);
+                        let c = c.chars().next().unwrap_or(char::REPLACEMENT_CHARACTER);
+                        return Err(format!("unknown option: -{c}"));
+                    }
                 }
             }
         } else {
-            return Err(format!("unknown command-line argument: \"{s}\""));
+            return Err(format!("unknown command-line argument: {arg:?}"));
         }
     }
 
     Ok(args)
+}
+
+/// Splits `s` into the parts before and after the ASCII character at the index `i` of its encoded
+/// bytes. The parts don't need to be valid UTF-8.
+///
+/// # Panics
+///
+/// Panics if the byte at the index `i` is not an ASCII character.
+fn split_at_ascii(s: &OsStr, i: usize) -> (&OsStr, &OsStr) {
+    let bytes = s.as_encoded_bytes();
+    assert!(bytes[i].is_ascii());
+    // SAFETY: The parts are split from an `OsStr` immediately before and after an ASCII character,
+    // which `OsStr::from_encoded_bytes_unchecked` allows.
+    unsafe {
+        (
+            OsStr::from_encoded_bytes_unchecked(&bytes[..i]),
+            OsStr::from_encoded_bytes_unchecked(&bytes[i + 1..]),
+        )
+    }
 }
 
 fn set_args_value<T>(field: &mut Option<T>, name: &str, val: T) -> Result<(), String> {
@@ -333,6 +367,7 @@ mod tests {
         assert!(parse(&["-vx"]).is_err());
         assert!(parse(&["positional"]).is_err());
         assert!(parse(&["-"]).is_err());
+        assert_eq!(parse(&["-vé"]), Err("unknown option: -é".into()));
     }
 
     #[test]
@@ -365,56 +400,57 @@ mod tests {
     }
 
     #[cfg(unix)]
-    mod non_utf8 {
-        use super::*;
+    fn bad() -> OsString {
         use std::os::unix::ffi::OsStringExt;
-
-        fn bad() -> OsString {
-            OsString::from_vec(vec![0x66, 0x6f, 0xff]) // "fo\xFF"
-        }
-
-        #[test]
-        fn non_utf8_branch_is_rejected() {
-            let err = parse_args([OsString::from("--branch"), bad()]).unwrap_err();
-            assert!(err.contains("not valid UTF-8"));
-        }
-
-        #[test]
-        fn non_utf8_repository_path_is_accepted() {
-            let args = parse_args([OsString::from("-C"), bad()]).unwrap();
-            assert_eq!(args.repository, Some(PathBuf::from(bad())));
-        }
-
-        #[test]
-        fn non_utf8_argument_itself_is_rejected() {
-            assert!(parse_args([bad()]).is_err());
-        }
+        OsString::from_vec(vec![0x66, 0x6f, 0xff]) // "fo\xFF"
     }
 
     #[cfg(windows)]
-    mod non_utf8 {
-        use super::*;
+    fn bad() -> OsString {
         use std::os::windows::ffi::OsStringExt;
+        OsString::from_wide(&[0x66, 0x6f, 0xD800])
+    }
 
-        fn bad() -> OsString {
-            OsString::from_wide(&[0x66, 0x6f, 0xD800])
-        }
+    fn with_bad(prefix: &str) -> OsString {
+        let mut s = OsString::from(prefix);
+        s.push(bad());
+        s
+    }
 
-        #[test]
-        fn non_utf8_branch_is_rejected() {
-            let err = parse_args([OsString::from("--branch"), bad()]).unwrap_err();
-            assert!(err.contains("not valid UTF-8"));
+    #[test]
+    fn non_utf8_branch_is_rejected() {
+        for argv in [
+            vec![OsString::from("--branch"), bad()],
+            vec![with_bad("--branch=")],
+            vec![OsString::from("-b"), bad()],
+            vec![with_bad("-b")],
+        ] {
+            let err = parse_args(argv.clone()).unwrap_err();
+            assert!(err.contains("not valid UTF-8"), "{argv:?}: {err}");
         }
+    }
 
-        #[test]
-        fn non_utf8_repository_path_is_accepted() {
-            let args = parse_args([OsString::from("-C"), bad()]).unwrap();
-            assert_eq!(args.repository, Some(PathBuf::from(bad())));
+    #[test]
+    fn non_utf8_repository_path_is_accepted() {
+        for argv in [
+            vec![OsString::from("--repository"), bad()],
+            vec![with_bad("--repository=")],
+            vec![OsString::from("-C"), bad()],
+            vec![with_bad("-C")],
+            vec![with_bad("-vC")],
+        ] {
+            let args = parse_args(argv.clone()).unwrap();
+            assert_eq!(args.repository, Some(PathBuf::from(bad())), "{argv:?}");
         }
+    }
 
-        #[test]
-        fn non_utf8_argument_itself_is_rejected() {
-            assert!(parse_args([bad()]).is_err());
+    #[test]
+    fn non_utf8_argument_itself_is_rejected() {
+        for arg in [bad(), with_bad("--"), with_bad("-v")] {
+            assert!(parse_args([arg.clone()]).is_err(), "{arg:?} should fail");
         }
+        let mut arg = with_bad("--");
+        arg.push("=value");
+        assert!(parse_args([arg]).is_err());
     }
 }
