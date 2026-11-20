@@ -22,6 +22,11 @@ and this project adheres to
   version much faster in repositories with long histories.
 - Explain how to fix a version tag that points to an object missing from the
   repository instead of only reporting that the tag cannot be peeled.
+- Show the help message when `-h` or `--help` is given even if the other
+  command-line arguments are invalid.
+- Suggest `--help` when the command-line arguments are invalid.
+- Leave the error class and code of libgit2 errors out of the error messages and
+  show them only in the verbose output.
 
 ### Fixed
 

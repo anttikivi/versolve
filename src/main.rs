@@ -14,23 +14,36 @@ mod args;
 mod resolve;
 
 use std::{
-    env, fmt,
+    env,
+    ffi::OsString,
+    fmt,
     io::{self, Write},
     process::ExitCode,
 };
 
 fn main() -> ExitCode {
-    match args::parse_args(env::args_os().skip(1)) {
-        Ok(args) => match run(args) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(e) => {
-                eprintln!("{e}");
-                ExitCode::FAILURE
-            }
+    let argv: Vec<OsString> = env::args_os().skip(1).collect();
+    let args = match args::parse_args(argv.clone()) {
+        Ok(args) => args,
+        // Show the help message when it is asked for even if the other
+        // arguments are invalid so that the --help flag effectively takes
+        // precedence.
+        Err(_) if args::asks_for_help(&argv) => args::Args {
+            help: Some(true),
+            ..Default::default()
         },
         Err(s) => {
             eprintln!("failed to parse command-line arguments: {s}");
-            ExitCode::from(2)
+            eprintln!("run \"versolve --help\" to see the usage");
+            return ExitCode::from(2);
+        }
+    };
+
+    match run(args) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("{e}");
+            ExitCode::FAILURE
         }
     }
 }

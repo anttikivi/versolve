@@ -47,6 +47,18 @@ impl TryFrom<Args> for Options {
 }
 
 pub fn from_git(opts: &Options) -> Result<Version, Box<dyn std::error::Error>> {
+    resolve_from_git(opts).map_err(|e| match e.downcast::<git2::Error>() {
+        // The libgit2 errors include their class and code, which only help
+        // with debugging, so show them only in the verbose output.
+        Ok(e) => {
+            verbose!(opts.verbose, "libgit2 error: {e}");
+            e.message().into()
+        }
+        Err(e) => e,
+    })
+}
+
+fn resolve_from_git(opts: &Options) -> Result<Version, Box<dyn std::error::Error>> {
     let repo = Repository::discover(&opts.repository)?;
 
     verbose!(opts.verbose, "opened repository at {:?}", repo.path());
@@ -230,7 +242,7 @@ fn collect_tags(
                     the object or delete the tag with \"git tag -d {tag}\""
                 )
             } else {
-                format!("failed to read tag \"{tag}\": {e}")
+                format!("failed to read tag \"{tag}\": {}", e.message())
             }
         })?;
         let Some(commit) = target.as_commit() else {

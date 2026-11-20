@@ -33,6 +33,15 @@ Options:
     --no-verbose                Do not print debug information
     --version                   Print Versolve's version";
 
+/// Reports whether `argv` asks for the help message with "-h" or "--help"
+/// before "--". Unlike `parse_args`, this works even if the other arguments are
+/// invalid.
+pub fn asks_for_help(argv: &[OsString]) -> bool {
+    argv.iter()
+        .take_while(|a| a.as_os_str() != "--")
+        .any(|a| a == "-h" || a == "--help")
+}
+
 pub fn parse_args<I>(argv: I) -> Result<Args, String>
 where
     I: IntoIterator<Item = OsString>,
@@ -370,6 +379,20 @@ mod tests {
         assert!(parse(&["positional"]).is_err());
         assert!(parse(&["-"]).is_err());
         assert_eq!(parse(&["-vé"]), Err("unknown option: -é".into()));
+    }
+
+    #[test]
+    fn asks_for_help_despite_invalid_arguments() {
+        for (argv, expected) in [
+            (&["--nope", "--help"][..], true),
+            (&["-x", "-h"], true),
+            (&["--nope"], false),
+            (&["--", "--help"], false),
+            (&["--branch=--help"], false),
+        ] {
+            let argv: Vec<OsString> = argv.iter().map(OsString::from).collect();
+            assert_eq!(asks_for_help(&argv), expected, "{argv:?}");
+        }
     }
 
     #[test]
