@@ -8,6 +8,13 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Changed
+
+- Always build libgit2 from the sources bundled with the `libgit2-sys` crate
+  instead of linking to a compatible version of the system library when one is
+  found, so that the installed binary does not break when the system library is
+  updated.
+
 ### Fixed
 
 - Exit with status 1 and an error message instead of panicking when writing to
