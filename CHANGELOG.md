@@ -14,6 +14,9 @@ and this project adheres to
   instead of linking to a compatible version of the system library when one is
   found, so that the installed binary does not break when the system library is
   updated.
+- Check for uncommitted changes without listing every file in untracked
+  directories, which makes the check faster when the working tree has large
+  untracked directories.
 
 ### Fixed
 

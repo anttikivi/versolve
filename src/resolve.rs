@@ -166,9 +166,7 @@ pub fn from_git(opts: &Options) -> Result<Version, Box<dyn std::error::Error>> {
     }
 
     let mut status_opts = StatusOptions::new();
-    let status_opts = status_opts
-        .include_untracked(true)
-        .recurse_untracked_dirs(true);
+    let status_opts = status_opts.include_untracked(true);
     let dirty =
         opts.check_dirty && !repo.is_bare() && !repo.statuses(Some(status_opts))?.is_empty();
 
@@ -566,6 +564,21 @@ mod tests {
         let version = repo.resolve();
         assert_version(&version, "1.1.2-0.1.main");
         assert_dirty(&version);
+    }
+
+    #[test]
+    fn dirty_untracked_directories() {
+        let repo = TestRepo::new();
+
+        repo.write_file(".gitignore", "*.log\n");
+        repo.commit_all("commit");
+        fs::create_dir_all(repo.path().join("empty/nested")).unwrap();
+        fs::create_dir_all(repo.path().join("logs/nested")).unwrap();
+        repo.write_file("logs/nested/build.log", "ignored\n");
+        assert_clean(&repo.resolve());
+
+        repo.write_file("logs/nested/file.txt", "untracked\n");
+        assert_dirty(&repo.resolve());
     }
 
     #[test]
