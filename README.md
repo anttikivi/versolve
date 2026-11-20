@@ -79,11 +79,19 @@ A development version always sorts after the tag it is based on and before any
 later release: `1.2.3` < `1.2.4-0.3` < `1.2.4-0.4` < `1.2.4`, and `2.0.0-rc.1` <
 `2.0.0-rc.1.0.2` < `2.0.0-rc.2`.
 
-This ordering holds as long as each new tag has a higher version than the tags
-it is based on and the first version tag is at least `0.1.0`. Versolve does not
-check this. For example, tagging a commit `0.0.1` after untagged commits that
-resolved to `0.1.0-0.<distance>` gives that commit a lower version than its
-parent.
+> [!NOTE]
+> This ordering holds as long as each new tag has a higher version than the
+> versions of the commits it is based on and the first version tag is at least
+> `0.1.0`. Versolve does not check this. For example, tagging a commit `0.0.1`
+> after untagged commits that resolved to `0.1.0-0.<distance>` gives that commit
+> a lower version than its parent.
+>
+> A tag that is higher than the previous tag can still be lower than the commits
+> between them. After `1.2.3`, a pre-release tag that starts with `0`, such as
+> `1.2.4-0.1`, can sort before `1.2.4-0.<distance>`. After `2.0.0-rc.1`, a tag
+> such as `2.0.0-rc.1.0` or `2.0.0-rc.1.0.1` can sort before
+> `2.0.0-rc.1.0.<distance>`. Tags such as `1.2.4-rc.1`, `1.2.4`, and
+> `2.0.0-rc.2` are safe.
 
 ### Branches
 
