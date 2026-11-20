@@ -45,6 +45,18 @@ jobs:
           echo "embedded: ${embedded}"
           echo "resolved: ${resolved}"
           test "${embedded}" = "${resolved}"
+  msrv:
+    name: msrv
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Install the minimum supported Rust version
+        run: |
+          msrv="$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name == "versolve") | .rust_version')"
+          rustup toolchain install "${msrv}" --profile minimal
+          echo "RUSTUP_TOOLCHAIN=${msrv}" >> "${GITHUB_ENV}"
+      - run: cargo check --locked --workspace --all-targets
   deny:
     name: deny
     runs-on: ubuntu-latest
