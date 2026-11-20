@@ -119,6 +119,7 @@ requests are checked out with a detached `HEAD`:
 ```yaml
 - uses: actions/checkout@v7
   with:
+    ref: ${{ github.event.pull_request.head.sha || github.sha }}
     fetch-depth: 0
     filter: blob:none
 - run: versolve -T v -B main -b "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}"
