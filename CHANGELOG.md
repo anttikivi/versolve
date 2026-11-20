@@ -8,6 +8,12 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Fixed
+
+- Exit with status 1 and an error message instead of panicking when writing to
+  the standard output fails, for example when the output is piped to a command
+  that has already exited.
+
 ## [0.1.0] - 2026-11-20
 
 ### Added

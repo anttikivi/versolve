@@ -13,7 +13,11 @@ macro_rules! verbose {
 mod args;
 mod resolve;
 
-use std::{env, process::ExitCode};
+use std::{
+    env, fmt,
+    io::{self, Write},
+    process::ExitCode,
+};
 
 fn main() -> ExitCode {
     match args::parse_args(env::args_os().skip(1)) {
@@ -43,12 +47,12 @@ fn run(args: args::Args) -> Result<(), Box<dyn std::error::Error>> {
     );
 
     if args.help.unwrap_or(false) {
-        println!("{}", args::USAGE);
+        print_line(args::USAGE)?;
         return Ok(());
     }
 
     if args.version.unwrap_or(false) {
-        println!("versolve {}", env!("VERSOLVE_VERSION"));
+        print_line(format_args!("versolve {}", env!("VERSOLVE_VERSION")))?;
         return Ok(());
     }
 
@@ -57,11 +61,16 @@ fn run(args: args::Args) -> Result<(), Box<dyn std::error::Error>> {
     verbose!(opts.verbose, "options parsed: {opts:?}");
 
     match resolve::from_git(&opts) {
-        Ok(v) => println!("{v}"),
+        Ok(v) => print_line(v)?,
         Err(s) => {
             return Err(format!("failed to resolve version: {s}").into());
         }
     }
 
     Ok(())
+}
+
+fn print_line(line: impl fmt::Display) -> Result<(), String> {
+    writeln!(io::stdout().lock(), "{line}")
+        .map_err(|e| format!("failed to write to standard output: {e}"))
 }

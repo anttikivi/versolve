@@ -22,6 +22,7 @@ fn run() -> Result {
                 "--recursive",
                 ".github",
                 "src",
+                "tests",
                 "xtask/src",
                 ".cargo/config.toml",
                 ".gitignore",
