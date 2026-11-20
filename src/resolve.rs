@@ -92,8 +92,9 @@ pub fn from_git(opts: &Options) -> Result<Version, Box<dyn std::error::Error>> {
         walk.push(head_oid)?;
 
         for oid in walk {
-            // Stop once every tag has been found. Tags that are not reachable from the current
-            // commit are never found, so with them the walk still visits the whole history.
+            // Stop once every tag that could still replace the base has been found. Such tags that
+            // are not reachable from the current commit are never found, so with them the walk
+            // still visits the whole history.
             if tags.is_empty() {
                 break;
             }
@@ -110,6 +111,8 @@ pub fn from_git(opts: &Options) -> Result<Version, Box<dyn std::error::Error>> {
                 },
             };
             if replace {
+                // The base only gets higher, so tags with a lower version can never replace it.
+                tags.retain(|_, t| t.cmp_precedence(&v) != Ordering::Less);
                 base = Some((oid, v));
             }
         }
@@ -364,6 +367,22 @@ mod tests {
             let head = parent.expect("no commits were created").id();
             repo.reference("refs/heads/main", head, true, "fast-forward")
                 .unwrap();
+        }
+
+        /// Creates a commit with the given parents and commit time without updating any references,
+        /// so that the tests control the order in which the commits are walked.
+        fn commit_at(&self, parents: &[Oid], time: i64) -> Oid {
+            let repo = Repository::open(self.path()).unwrap();
+            let tree_oid = repo.treebuilder(None).unwrap().write().unwrap();
+            let tree = repo.find_tree(tree_oid).unwrap();
+            let sig = Signature::new("Test", "test@example.com", &Time::new(time, 0)).unwrap();
+            let parents: Vec<Commit> = parents
+                .iter()
+                .map(|&oid| repo.find_commit(oid).unwrap())
+                .collect();
+            let parents: Vec<&Commit> = parents.iter().collect();
+            repo.commit(None, &sig, &sig, "commit", &tree, &parents)
+                .unwrap()
         }
 
         fn tag(&self, name: &str) {
@@ -851,6 +870,36 @@ mod tests {
         repo.git(&["checkout", "hotfix"]);
         repo.git(&["merge", "--no-ff", "-m", "merge main", "main"]);
         assert_version(&repo.resolve(), "2.0.1-0.3.hotfix");
+    }
+
+    #[test]
+    fn higher_tag_found_after_lower_tag() {
+        let repo = TestRepo::new();
+
+        // The merge is walked to the lower tag first, as it is the first parent and newer.
+        let root = repo.commit_at(&[], 1735689600);
+        let higher = repo.commit_at(&[root], 1735689610);
+        let lower = repo.commit_at(&[root], 1735689620);
+        let merge = repo.commit_at(&[lower, higher], 1735689630);
+        repo.git(&["tag", "2.0.0", &higher.to_string()]);
+        repo.git(&["tag", "1.5.0", &lower.to_string()]);
+        repo.git(&["update-ref", "refs/heads/main", &merge.to_string()]);
+        assert_version(&repo.resolve(), "2.0.1-0.2.main");
+    }
+
+    #[test]
+    fn equal_tag_on_descendant_found_after_ancestor() {
+        let repo = TestRepo::new();
+
+        // The descendant has an older commit time than its parent, so the merge is walked to the
+        // ancestor first.
+        let ancestor = repo.commit_at(&[], 1735689620);
+        let descendant = repo.commit_at(&[ancestor], 1735689610);
+        let merge = repo.commit_at(&[ancestor, descendant], 1735689630);
+        repo.git(&["tag", "1.0.0+a", &ancestor.to_string()]);
+        repo.git(&["tag", "1.0.0+b", &descendant.to_string()]);
+        repo.git(&["update-ref", "refs/heads/main", &merge.to_string()]);
+        assert_version(&repo.resolve(), "1.0.1-0.1.main");
     }
 
     #[test]

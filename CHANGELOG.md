@@ -17,6 +17,9 @@ and this project adheres to
 - Check for uncommitted changes without listing every file in untracked
   directories, which makes the check faster when the working tree has large
   untracked directories.
+- Stop searching for the latest version tag once no tag with a higher version
+  is left instead of searching for every version tag, which makes resolving the
+  version much faster in repositories with long histories.
 - Explain how to fix a version tag that points to an object missing from the
   repository instead of only reporting that the tag cannot be peeled.
 
