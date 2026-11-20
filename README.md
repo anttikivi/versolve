@@ -114,6 +114,18 @@ working tree has uncommitted changes, including untracked files that are not
 ignored, `.dirty` is appended to it, for example `1.2.4-0.3+g1a2b3c4.dirty`.
 Build metadata does not affect the ordering of the versions.
 
+### Repository formats
+
+Versolve reads the repository with [libgit2](https://libgit2.org/). It supports
+repositories that use SHA-1 or SHA-256 object IDs. The support for SHA-256 in
+libgit2 is still experimental.
+
+Repositories that store their references in the reftable format, for example
+ones created with `git init --ref-format=reftable`, are not supported, as
+libgit2 doesn't have support for them. To use Versolve in such a repository,
+convert its references to the files format with
+`git refs migrate --ref-format=files`, which requires Git 2.46 or later.
+
 ### GitHub Actions
 
 Versolve needs the full history and the tags of the repository. It refuses to

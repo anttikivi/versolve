@@ -8,6 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Added
+
+- Experimental support for repositories that use SHA-256 object IDs.
+
 ### Changed
 
 - Always build libgit2 from the sources bundled with the `libgit2-sys` crate

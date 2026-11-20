@@ -301,10 +301,16 @@ mod tests {
 
     impl TestRepo {
         fn new() -> Self {
+            Self::init(&[])
+        }
+
+        fn init(args: &[&str]) -> Self {
             let repo = Self {
                 dir: TempDir::new().expect("failed to create temporary directory"),
             };
-            repo.git(&["init", "--initial-branch=main"]);
+            let mut init = vec!["init", "--initial-branch=main"];
+            init.extend_from_slice(args);
+            repo.git(&init);
             repo
         }
 
@@ -932,6 +938,27 @@ mod tests {
 
         repo.git(&["merge", "--no-ff", "-m", "merge side", "side"]);
         assert_version(&repo.resolve(), "1.0.1-0.4.main");
+    }
+
+    #[test]
+    fn sha256_repository() {
+        let repo = TestRepo::init(&["--object-format=sha256"]);
+
+        repo.commit("commit");
+        repo.tag("1.0.0");
+        repo.git(&["tag", "2.0.0", "HEAD^{tree}"]);
+        assert_version(&repo.resolve(), "1.0.0");
+
+        repo.commit_many(2);
+        repo.git(&["checkout", "-b", "feature"]);
+        repo.commit("commit");
+        repo.make_dirty();
+        let version = repo.resolve();
+        assert_version(&version, "1.0.1-0.3.feature");
+        assert_eq!(
+            version.build.as_str(),
+            format!("g{}.dirty", repo.short_head_id())
+        );
     }
 
     #[test]
