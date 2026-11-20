@@ -67,7 +67,17 @@ pub fn from_git(opts: &Options) -> Result<Version, Box<dyn std::error::Error>> {
 
     let head_ref = match repo.head() {
         Err(e) if e.code() == ErrorCode::UnbornBranch => {
-            return Err("repository has no commits".into());
+            let head = repo.find_reference("HEAD")?;
+            let branch = head
+                .symbolic_target()
+                .ok()
+                .flatten()
+                .and_then(|t| t.strip_prefix("refs/heads/"));
+            return Err(match branch {
+                Some(b) => format!("the current branch \"{b}\" has no commits"),
+                None => "the current branch has no commits".into(),
+            }
+            .into());
         }
         head => head?,
     };
@@ -719,7 +729,25 @@ mod tests {
         let repo = TestRepo::new();
 
         let err = from_git(&repo.options()).unwrap_err();
-        assert_eq!(err.to_string(), "repository has no commits");
+        assert_eq!(
+            err.to_string(),
+            "the current branch \"main\" has no commits"
+        );
+    }
+
+    #[test]
+    fn orphan_branch() {
+        let repo = TestRepo::new();
+
+        repo.commit("commit");
+        repo.tag("1.0.0");
+        repo.git(&["checkout", "--orphan", "orphan"]);
+
+        let err = from_git(&repo.options()).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "the current branch \"orphan\" has no commits"
+        );
     }
 
     #[test]
