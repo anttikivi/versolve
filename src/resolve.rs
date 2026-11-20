@@ -17,8 +17,8 @@ use crate::args::Args;
 #[derive(Debug)]
 pub struct Options {
     pub verbose: bool,
-    /// Whether to append `.dirty` to the build metadata if the working tree has uncommitted
-    /// changes.
+    /// Whether to append `.dirty` to the build metadata if the working tree has
+    /// uncommitted changes.
     pub check_dirty: bool,
     branch: Option<String>,
     default_branch: Option<String>,
@@ -84,17 +84,18 @@ pub fn from_git(opts: &Options) -> Result<Version, Box<dyn std::error::Error>> {
     let head_commit = head_ref.peel(ObjectType::Commit)?;
     let head_oid = head_commit.id();
 
-    // A tag on the current commit is always used as is, even if a reachable tag has a higher
-    // version.
+    // A tag on the current commit is always used as is, even if a reachable tag
+    // has a higher version.
     let mut base = tags.remove(&head_oid).map(|v| (head_oid, v));
     if base.is_none() && !tags.is_empty() {
         let mut walk = repo.revwalk()?;
         walk.push(head_oid)?;
 
         for oid in walk {
-            // Stop once every tag that could still replace the base has been found. Such tags that
-            // are not reachable from the current commit are never found, so with them the walk
-            // still visits the whole history.
+            // Stop once every tag that could still replace the base has been
+            // found. Such tags that are not reachable from the current commit
+            // are never found, so with them the walk still visits the whole
+            // history.
             if tags.is_empty() {
                 break;
             }
@@ -111,7 +112,8 @@ pub fn from_git(opts: &Options) -> Result<Version, Box<dyn std::error::Error>> {
                 },
             };
             if replace {
-                // The base only gets higher, so tags with a lower version can never replace it.
+                // The base only gets higher, so tags with a lower version can
+                // never replace it.
                 tags.retain(|_, t| t.cmp_precedence(&v) != Ordering::Less);
                 base = Some((oid, v));
             }
@@ -369,8 +371,9 @@ mod tests {
                 .unwrap();
         }
 
-        /// Creates a commit with the given parents and commit time without updating any references,
-        /// so that the tests control the order in which the commits are walked.
+        /// Creates a commit with the given parents and commit time without
+        /// updating any references, so that the tests control the order in
+        /// which the commits are walked.
         fn commit_at(&self, parents: &[Oid], time: i64) -> Oid {
             let repo = Repository::open(self.path()).unwrap();
             let tree_oid = repo.treebuilder(None).unwrap().write().unwrap();
@@ -891,8 +894,8 @@ mod tests {
     fn equal_tag_on_descendant_found_after_ancestor() {
         let repo = TestRepo::new();
 
-        // The descendant has an older commit time than its parent, so the merge is walked to the
-        // ancestor first.
+        // The descendant has an older commit time than its parent, so the merge
+        // is walked to the ancestor first.
         let ancestor = repo.commit_at(&[], 1735689620);
         let descendant = repo.commit_at(&[ancestor], 1735689610);
         let merge = repo.commit_at(&[ancestor, descendant], 1735689630);

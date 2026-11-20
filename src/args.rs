@@ -41,8 +41,9 @@ where
     let mut it = argv.into_iter();
 
     while let Some(arg) = it.next() {
-        // Only the option names need to be valid UTF-8. Look at the encoded bytes so that values
-        // attached to the options like "-C<path>" don't need to be.
+        // Only the option names need to be valid UTF-8. Look at the encoded
+        // bytes so that values attached to the options like "-C<path>" don't
+        // need to be.
         let bytes = arg.as_encoded_bytes();
 
         if bytes == b"--" {
@@ -106,7 +107,8 @@ where
                     b'v' => set_args_value(&mut args.verbose, "-v", true)?,
                     b'b' | b'B' | b'C' | b'T' => {
                         let c = char::from(c);
-                        // The option is at index i + 1 of the argument because of the "-".
+                        // The option is at index i + 1 of the argument because
+                        // of the "-".
                         let (_, rest) = split_at_ascii(&arg, i + 1);
                         let val = if rest.is_empty() {
                             it.next()
@@ -146,8 +148,8 @@ where
     Ok(args)
 }
 
-/// Splits `s` into the parts before and after the ASCII character at the index `i` of its encoded
-/// bytes. The parts don't need to be valid UTF-8.
+/// Splits `s` into the parts before and after the ASCII character at the index
+/// `i` of its encoded bytes. The parts don't need to be valid UTF-8.
 ///
 /// # Panics
 ///
@@ -155,8 +157,8 @@ where
 fn split_at_ascii(s: &OsStr, i: usize) -> (&OsStr, &OsStr) {
     let bytes = s.as_encoded_bytes();
     assert!(bytes[i].is_ascii());
-    // SAFETY: The parts are split from an `OsStr` immediately before and after an ASCII character,
-    // which `OsStr::from_encoded_bytes_unchecked` allows.
+    // SAFETY: The parts are split from an `OsStr` immediately before and after
+    // an ASCII character, which `OsStr::from_encoded_bytes_unchecked` allows.
     unsafe {
         (
             OsStr::from_encoded_bytes_unchecked(&bytes[..i]),

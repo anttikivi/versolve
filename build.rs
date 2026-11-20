@@ -25,12 +25,12 @@ fn main() {
     let root = env::var_os("CARGO_MANIFEST_DIR").unwrap();
     let root = Path::new(&root);
 
-    // Don't resolve version from a repository that happens to contain Versolve from e.g. vendor
-    // directory.
+    // Don't resolve version from a repository that happens to contain Versolve
+    // from e.g. vendor directory.
     let version = match Repository::open(root) {
         Ok(repo) => {
-            // The embedded version depends only on the committed state, so changes to the working
-            // tree don't need to be tracked.
+            // The embedded version depends only on the committed state, so
+            // changes to the working tree don't need to be tracked.
             println!(
                 "cargo::rerun-if-changed={}",
                 repo.path().join("HEAD").display()
