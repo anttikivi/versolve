@@ -18,7 +18,7 @@ pub struct Args {
     pub version: Option<bool>,
 }
 
-pub const USAGE: &str = "Resolve unique version number for Git revision
+pub const USAGE: &str = "Resolve a unique version number for a Git revision
 
 Usage: versolve [options]
 

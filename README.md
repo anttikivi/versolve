@@ -38,6 +38,7 @@ $ versolve --tag-prefix v --default-branch main
 | `-C`, `--repository <path>`     | Resolve the version for this repository              |
 | `-T`, `--tag-prefix <prefix>`   | Consider only tags with this prefix, for example `v` |
 | `-v`, `--verbose`               | Print debug information to standard error            |
+| `--no-verbose`                  | Do not print debug information                       |
 | `-h`, `--help`                  | Print the help message                               |
 | `--version`                     | Print the version of Versolve                        |
 
