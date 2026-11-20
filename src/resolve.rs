@@ -218,7 +218,16 @@ fn collect_tags(
                 continue;
             }
         };
-        let target = reference.peel(ObjectType::Any)?;
+        let target = reference.peel(ObjectType::Any).map_err(|e| {
+            if e.code() == ErrorCode::NotFound {
+                format!(
+                    "tag \"{tag}\" points to an object that is missing from the repository, fetch \
+                    the object or delete the tag with \"git tag -d {tag}\""
+                )
+            } else {
+                format!("failed to read tag \"{tag}\": {e}")
+            }
+        })?;
         let Some(commit) = target.as_commit() else {
             verbose!(
                 verbose,
@@ -963,5 +972,24 @@ mod tests {
         line.push(b'\n');
         fs::write(repo.path().join(".git/packed-refs"), line).unwrap();
         assert_version(&repo.resolve(), "1.0.1-0.1.main");
+    }
+
+    #[test]
+    fn missing_tag_target_is_an_error() {
+        let repo = TestRepo::new();
+        let missing = "1111111111111111111111111111111111111111\n";
+
+        repo.commit("commit");
+        repo.tag("1.0.0");
+        fs::write(repo.path().join(".git/refs/tags/latest"), missing).unwrap();
+        assert_version(&repo.resolve(), "1.0.0");
+
+        fs::write(repo.path().join(".git/refs/tags/2.0.0"), missing).unwrap();
+        let err = from_git(&repo.options()).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "tag \"2.0.0\" points to an object that is missing from the repository, fetch the \
+            object or delete the tag with \"git tag -d 2.0.0\""
+        );
     }
 }

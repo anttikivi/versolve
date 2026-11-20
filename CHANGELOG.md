@@ -17,6 +17,8 @@ and this project adheres to
 - Check for uncommitted changes without listing every file in untracked
   directories, which makes the check faster when the working tree has large
   untracked directories.
+- Explain how to fix a version tag that points to an object missing from the
+  repository instead of only reporting that the tag cannot be peeled.
 
 ### Fixed
 
