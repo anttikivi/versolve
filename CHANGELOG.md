@@ -39,6 +39,8 @@ and this project adheres to
   that has already exited.
 - Keep the exit status instead of panicking when writing error messages or
   verbose output to the standard error fails.
+- Stop rerunning the build script on every build in a Git checkout that has no
+  `packed-refs` file.
 - Report that the current branch has no commits instead of the whole repository,
   as the repository may have commits on other branches, for example after
   `git checkout --orphan`.

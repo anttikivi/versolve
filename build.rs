@@ -35,11 +35,13 @@ fn main() {
                 "cargo::rerun-if-changed={}",
                 repo.path().join("HEAD").display()
             );
-            for path in ["refs", "packed-refs"] {
-                println!(
-                    "cargo::rerun-if-changed={}",
-                    repo.commondir().join(path).display()
-                );
+            println!(
+                "cargo::rerun-if-changed={}",
+                repo.commondir().join("refs").display()
+            );
+            let packed_refs = repo.commondir().join("packed-refs");
+            if packed_refs.exists() {
+                println!("cargo::rerun-if-changed={}", packed_refs.display());
             }
             for path in ["build.rs", "Cargo.toml"] {
                 println!("cargo::rerun-if-changed={path}");
