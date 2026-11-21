@@ -159,6 +159,123 @@ requests are checked out with a detached `HEAD`:
 - run: versolve -T v -B main -b "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}"
 ```
 
+## Using Versolve from a build script
+
+Versolve is also a library. To embed the resolved version in your own program,
+add Versolve to the build dependencies:
+
+```toml
+[build-dependencies]
+versolve = "0.3"
+```
+
+Then resolve the version in `build.rs`:
+
+```rust
+fn main() {
+    versolve::build::Config::new()
+        .tag_prefix("v")
+        .default_branch("main")
+        .branch_env("MYAPP_BUILD_BRANCH")
+        .emit("MYAPP_VERSION")
+        .unwrap();
+}
+```
+
+`emit` sets the environment variable `MYAPP_VERSION` for the package, so the
+program can read the version at compile time:
+
+```rust
+const VERSION: &str = env!("MYAPP_VERSION");
+```
+
+The version is resolved from the committed state of the repository that contains
+the package, so it never has `.dirty` in it: a build script can't track every
+change in the working tree. The build script is run again when `HEAD`, the
+references, the Git configuration, `Cargo.toml`, or the branch variable changes.
+
+> [!IMPORTANT]
+> Printing any `rerun-if-changed` or `rerun-if-env-changed` instruction turns
+> off Cargo's default of running the build script again whenever any file in the
+> package changes, and `emit` prints them. If your build script has other
+> inputs, print `cargo:rerun-if-changed` for them too.
+
+### Falling back to the version in `Cargo.toml`
+
+`emit` uses the version from `Cargo.toml` without a warning if the package:
+
+- was packaged with `cargo package`, so it was downloaded from crates.io or
+  another registry, vendored with `cargo vendor`, or is the verification build
+  of `cargo package` or `cargo publish`;
+- is not in a Git repository; or
+- is in a directory that the repository ignores, such as a vendor directory
+  listed in `.gitignore`.
+
+If the package is in a repository but the version can't be resolved, `emit`
+prints a warning and uses the version from `Cargo.toml`. This happens, for
+example, in a shallow clone or when `HEAD` is detached at a commit that has no
+version tag. `HEAD` is detached not only when CI checks out a pull request but
+also in the middle of `git rebase` or `git bisect`. Set the branch variable,
+here `MYAPP_BUILD_BRANCH`, to name the branch in those cases. An empty value
+counts as unset.
+
+To fail the build instead, turn on strict mode with `.strict(true)`. Use it, for
+example, when building releases in CI, so that a shallow clone fails the build
+instead of embedding the version from `Cargo.toml`. In strict mode, a build with
+a detached `HEAD` fails unless the commit has a version tag or the branch
+variable is set. Packages that are not in a repository still use the version
+from `Cargo.toml`.
+
+Versolve resolves the version of the repository that contains the package. If
+the package's sources are copied into another repository, for example with
+`git subtree`, the version is resolved from that repository's tags.
+
+### Building in GitHub Actions
+
+Like the command-line tool, the build script needs the full history and the
+tags. Check out the repository and pass the branch name in the variable:
+
+```yaml
+- uses: actions/checkout@v7
+  with:
+    ref: ${{ github.event.pull_request.head.sha || github.sha }}
+    fetch-depth: 0
+    filter: blob:none
+- run: cargo build --release
+  env:
+    MYAPP_BUILD_BRANCH: ${{ github.head_ref || github.ref_name }}
+```
+
+### Requirements and features
+
+The library requires Rust 1.88 or later and a C compiler, as libgit2 is built
+from the sources bundled with `libgit2-sys` by default. This makes the first
+build slower.
+
+Versolve has two features, both on by default:
+
+- `vendored-libgit2`: always build libgit2 from the bundled sources. Without it,
+  a compatible libgit2 installed on the system is used if one is found, and the
+  bundled sources otherwise.
+- `sha256`: support repositories that use SHA-256 object IDs. This builds
+  libgit2 with its experimental SHA-256 support, which is not compatible with
+  the regular library, so without `vendored-libgit2` a system library is used
+  only if it is built with SHA-256 support.
+
+Cargo combines the features that all packages enable for a dependency. With the
+default features, every other build dependency that uses `git2` also gets the
+bundled libgit2 with SHA-256 support. To avoid this, turn off the default
+features:
+
+```toml
+[build-dependencies]
+versolve = { version = "0.3", default-features = false }
+```
+
+### Minimum supported Rust version
+
+The minimum supported Rust version is raised only in a minor release.
+
 ## License
 
 Versolve is distributed under the terms of both the MIT license and the Apache

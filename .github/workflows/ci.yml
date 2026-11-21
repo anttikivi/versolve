@@ -33,6 +33,10 @@ jobs:
       - run: cargo clippy --locked --workspace --all-targets -- -D warnings
       - run: cargo build --locked --workspace
       - run: cargo test --locked --workspace
+      - run: cargo check --locked --workspace --no-default-features
+      - run: cargo doc --locked --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
       - name: Check the embedded version
         shell: bash
         run: |
@@ -42,6 +46,17 @@ jobs:
           echo "embedded: ${embedded}"
           echo "resolved: ${resolved}"
           test "${embedded}" = "${resolved}"
+  e2e:
+    name: e2e
+    runs-on: ubuntu-latest
+    env:
+      VERSOLVE_BUILD_BRANCH: ${{ github.head_ref || github.ref_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - run: cargo run --locked --package xtask -- e2e
   msrv:
     name: msrv
     runs-on: ubuntu-latest

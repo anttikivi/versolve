@@ -1,13 +1,4 @@
-macro_rules! verbose {
-    ($enabled:expr, $($args:tt)*) => {
-        if $enabled {
-            crate::eprint_line(format_args!($($args)*));
-        }
-    };
-}
-
 mod args;
-mod resolve;
 
 use std::{
     env,
@@ -17,7 +8,11 @@ use std::{
     process::ExitCode,
 };
 
-use semver::{BuildMetadata, Version};
+use log::{LevelFilter, Log, Metadata, Record};
+use versolve::{
+    ErrorKind, Resolver,
+    semver::{BuildMetadata, Version},
+};
 
 fn main() -> ExitCode {
     let argv: Vec<OsString> = env::args_os().skip(1).collect();
@@ -55,11 +50,10 @@ fn run(args: args::Args) -> Result<(), Box<dyn std::error::Error>> {
         ..version.clone()
     };
 
-    verbose!(args.verbose.unwrap_or(false), "running versolve {version}");
-    verbose!(
-        args.verbose.unwrap_or(false),
-        "command-line arguments parsed: {args:?}"
-    );
+    init_logger(args.verbose.unwrap_or(false));
+
+    log::debug!("running versolve {version}");
+    log::debug!("command-line arguments parsed: {args:?}");
 
     if args.help.unwrap_or(false) {
         print_line(args::USAGE)?;
@@ -75,18 +69,72 @@ fn run(args: args::Args) -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    let opts = resolve::Options::try_from(args)?;
+    let resolver = resolver(args)?;
 
-    verbose!(opts.verbose, "options parsed: {opts:?}");
+    log::debug!("options parsed: {resolver:?}");
 
-    match resolve::from_git(&opts) {
+    match resolver.resolve() {
         Ok(v) => print_line(v)?,
-        Err(s) => {
-            return Err(format!("failed to resolve version: {s}").into());
+        Err(e) if e.kind() == ErrorKind::DetachedHead => {
+            return Err(format!(
+                "failed to resolve version: {e}; pass \"--branch\" to name the branch"
+            )
+            .into());
+        }
+        Err(e) => {
+            return Err(format!("failed to resolve version: {e}").into());
         }
     }
 
     Ok(())
+}
+
+fn resolver(args: args::Args) -> io::Result<Resolver> {
+    let repository = match args.repository {
+        Some(path) => path,
+        None => env::current_dir()?,
+    };
+    let mut resolver = Resolver::new(repository);
+    if let Some(prefix) = args.tag_prefix {
+        resolver = resolver.tag_prefix(prefix);
+    }
+    if let Some(name) = args.default_branch {
+        resolver = resolver.default_branch(name);
+    }
+    if let Some(name) = args.branch {
+        resolver = resolver.branch(name);
+    }
+    Ok(resolver)
+}
+
+/// Prints the debug messages from Versolve to the standard error.
+struct Logger;
+
+impl Log for Logger {
+    fn enabled(&self, metadata: &Metadata) -> bool {
+        // Leave out the messages from the dependencies, such as git2.
+        metadata.target().split("::").next() == Some("versolve")
+    }
+
+    fn log(&self, record: &Record) {
+        if self.enabled(record.metadata()) {
+            eprint_line(record.args());
+        }
+    }
+
+    fn flush(&self) {}
+}
+
+fn init_logger(verbose: bool) {
+    static LOGGER: Logger = Logger;
+    // This fails only if a logger is already set, and this is the only place
+    // that sets one.
+    let _ = log::set_logger(&LOGGER);
+    log::set_max_level(if verbose {
+        LevelFilter::Debug
+    } else {
+        LevelFilter::Off
+    });
 }
 
 fn print_line(line: impl fmt::Display) -> Result<(), String> {

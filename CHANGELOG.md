@@ -8,12 +8,28 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Added
+
+- A library API for resolving versions from Rust code: `Resolver`, `Error`, and
+  `ErrorKind`. The version is a `semver::Version`, and the `semver` crate is
+  re-exported.
+- Debug messages from the library through the `log` crate.
+- The `versolve::build` module for embedding the resolved version in a package
+  from its build script.
+- The `sha256` and `vendored-libgit2` features, both on by default, to turn off
+  SHA-256 support and building the bundled libgit2.
+
 ### Changed
 
 - Versolve is now licensed under either of the MIT license or the Apache
   License, Version 2.0, at your option. Earlier releases remain under the GNU
   General Public License v3.0 or later.
 - Print the build metadata with `--version` only when verbose output is enabled.
+
+### Fixed
+
+- When building from source with a detached `HEAD`, the build warning now
+  suggests setting `VERSOLVE_BUILD_BRANCH` instead of passing `--branch`.
 
 ## [0.2.0] - 2026-11-21
 

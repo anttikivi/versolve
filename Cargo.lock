@@ -190,6 +190,7 @@ name = "versolve"
 version = "0.3.0-dev"
 dependencies = [
  "git2",
+ "log",
  "semver",
  "tempfile",
 ]

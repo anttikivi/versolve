@@ -2,226 +2,304 @@ use std::{
     borrow::Cow,
     cmp::Ordering,
     collections::{HashMap, hash_map::Entry},
-    env, fs, io,
-    path::PathBuf,
+    fs,
+    path::{Path, PathBuf},
 };
 
-use git2::{Config, ErrorCode, ObjectType, Oid, Repository, StatusOptions};
+use git2::{Config, ErrorClass, ErrorCode, ObjectType, Oid, Repository, StatusOptions};
 use semver::{BuildMetadata, Prerelease, Version};
 
-use crate::args::Args;
+use super::error::{Error, ErrorKind};
 
-#[derive(Debug)]
-pub struct Options {
-    pub verbose: bool,
-    /// Whether to append `.dirty` to the build metadata if the working tree has
-    /// uncommitted changes.
-    pub check_dirty: bool,
-    branch: Option<String>,
-    default_branch: Option<String>,
+/// Resolves the version of a Git repository.
+///
+/// Create a resolver with [`Resolver::new`], configure it with the builder
+/// methods, and call [`Resolver::resolve`]:
+///
+/// ```no_run
+/// let version = versolve::Resolver::new(".")
+///     .tag_prefix("v")
+///     .default_branch("main")
+///     .resolve()?;
+/// println!("{version}");
+/// # Ok::<(), versolve::Error>(())
+/// ```
+#[derive(Clone, Debug)]
+pub struct Resolver {
     repository: PathBuf,
-    tag_prefix: Option<String>,
+    tag_prefix: String,
+    default_branch: Option<String>,
+    branch: Option<String>,
+    check_dirty: bool,
 }
 
-impl TryFrom<Args> for Options {
-    type Error = io::Error;
-
-    fn try_from(value: Args) -> Result<Self, Self::Error> {
-        let repository = match value.repository {
-            Some(path) => path,
-            None => env::current_dir()?,
-        };
-
-        Ok(Self {
-            branch: value.branch,
+impl Resolver {
+    /// Creates a resolver for the repository at `repository`.
+    ///
+    /// The repository is looked for at `repository` and in its parent
+    /// directories, like Git does, so any path inside the working tree works.
+    pub fn new(repository: impl Into<PathBuf>) -> Self {
+        Self {
+            repository: repository.into(),
+            tag_prefix: String::new(),
+            default_branch: None,
+            branch: None,
             check_dirty: true,
-            default_branch: value.default_branch,
-            repository,
-            tag_prefix: value.tag_prefix,
-            verbose: value.verbose.unwrap_or(false),
-        })
-    }
-}
-
-pub fn from_git(opts: &Options) -> Result<Version, Box<dyn std::error::Error>> {
-    resolve_from_git(opts).map_err(|e| match e.downcast::<git2::Error>() {
-        Ok(e) => {
-            verbose!(opts.verbose, "libgit2 error: {e}");
-            e.message().into()
-        }
-        Err(e) => e,
-    })
-}
-
-fn resolve_from_git(opts: &Options) -> Result<Version, Box<dyn std::error::Error>> {
-    let repo = match Repository::discover(&opts.repository) {
-        Err(e) if e.message().contains("extensions.refstorage") => {
-            verbose!(opts.verbose, "libgit2 error: {e}");
-            return Err(ref_storage_error(opts).into());
-        }
-        repo => repo?,
-    };
-
-    verbose!(opts.verbose, "opened repository at {:?}", repo.path());
-
-    let shallow_in_commondir =
-        || fs::metadata(repo.commondir().join("shallow")).is_ok_and(|m| m.len() > 0);
-    if repo.is_shallow() || shallow_in_commondir() {
-        return Err(
-            "repository is a shallow clone and its history may be incomplete, fetch the full \
-            history with \"git fetch --unshallow --tags\""
-                .into(),
-        );
-    }
-
-    let mut tags = collect_tags(
-        &repo,
-        opts.tag_prefix.as_deref().unwrap_or(""),
-        opts.verbose,
-    )?;
-
-    let head_ref = match repo.head() {
-        Err(e) if e.code() == ErrorCode::UnbornBranch => {
-            let head = repo.find_reference("HEAD")?;
-            let branch = head
-                .symbolic_target()
-                .ok()
-                .flatten()
-                .and_then(|t| t.strip_prefix("refs/heads/"));
-            return Err(match branch {
-                Some(b) => format!("the current branch \"{b}\" has no commits"),
-                None => "the current branch has no commits".into(),
-            }
-            .into());
-        }
-        head => head?,
-    };
-    let head_commit = head_ref.peel(ObjectType::Commit)?;
-    let head_oid = head_commit.id();
-
-    let (mut base, mut base_oids) = match tags.remove(&head_oid) {
-        Some(v) => (Some(v), vec![head_oid]),
-        None => (None, Vec::new()),
-    };
-    if base.is_none() && !tags.is_empty() {
-        let mut walk = repo.revwalk()?;
-        walk.push(head_oid)?;
-
-        for oid in walk {
-            if tags.is_empty() {
-                break;
-            }
-            let oid = oid?;
-            let Some(v) = tags.remove(&oid) else {
-                continue;
-            };
-            match base.as_ref().map(|b| v.cmp_precedence(b)) {
-                None | Some(Ordering::Greater) => {
-                    tags.retain(|_, t| t.cmp_precedence(&v) != Ordering::Less);
-                    base = Some(v);
-                    base_oids = vec![oid];
-                }
-                Some(Ordering::Equal) => base_oids.push(oid),
-                Some(Ordering::Less) => {}
-            }
         }
     }
 
-    let distance_from = |base_oid: Option<Oid>| -> Result<usize, git2::Error> {
-        let mut walk = repo.revwalk()?;
-        walk.push(head_oid)?;
-        if let Some(oid) = base_oid {
-            walk.hide(oid)?;
-        }
-        walk.try_fold(0, |n, id| id.map(|_| n + 1))
-    };
-    let distance = match base_oids.as_slice() {
-        [] => distance_from(None)?,
-        oids => oids
-            .iter()
-            .try_fold(0, |d, &oid| distance_from(Some(oid)).map(|n| d.max(n)))?,
-    };
+    /// Considers only the tags whose names start with `prefix`, for example
+    /// `v`. The prefix is removed before parsing the rest of the name as a
+    /// version. By default, the prefix is empty.
+    pub fn tag_prefix(mut self, prefix: impl Into<String>) -> Self {
+        self.tag_prefix = prefix.into();
+        self
+    }
 
-    let mut version = match base {
-        Some(mut v) => {
-            if distance > 0 && v.pre.is_empty() {
-                v.patch = v.patch.checked_add(1).ok_or_else(|| {
-                    format!("cannot increment the patch version of {v}, it is the maximum value")
-                })?;
+    /// Omits the branch name from the versions of commits on the branch
+    /// `name`.
+    pub fn default_branch(mut self, name: impl Into<String>) -> Self {
+        self.default_branch = Some(name.into());
+        self
+    }
+
+    /// Uses `name` as the branch name instead of the current branch. The
+    /// branch name is required if `HEAD` is detached and the current commit
+    /// has no version tag.
+    pub fn branch(mut self, name: impl Into<String>) -> Self {
+        self.branch = Some(name.into());
+        self
+    }
+
+    /// Sets whether to append `.dirty` to the build metadata if the working
+    /// tree has uncommitted changes, including untracked files that are not
+    /// ignored. The check is on by default.
+    pub fn check_dirty(mut self, check: bool) -> Self {
+        self.check_dirty = check;
+        self
+    }
+
+    /// Resolves the version of the repository.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the repository is not found or not supported, or if
+    /// the version can't be resolved. See [`ErrorKind`] for the reasons.
+    pub fn resolve(&self) -> Result<Version, Error> {
+        let repo = open_repository(&self.repository)?;
+        self.resolve_repository(&repo)
+    }
+
+    /// Resolves the version of the already opened repository `repo`. The
+    /// repository path of the resolver is not used.
+    pub(crate) fn resolve_repository(&self, repo: &Repository) -> Result<Version, Error> {
+        if self.branch.as_deref() == Some("") {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "branch name cannot be empty",
+            ));
+        }
+
+        let shallow_in_commondir =
+            || fs::metadata(repo.commondir().join("shallow")).is_ok_and(|m| m.len() > 0);
+        if repo.is_shallow() || shallow_in_commondir() {
+            return Err(Error::new(
+                ErrorKind::ShallowClone,
+                "repository is a shallow clone and its history may be incomplete, fetch the full \
+                history with \"git fetch --unshallow --tags\"",
+            ));
+        }
+
+        let mut tags = collect_tags(repo, &self.tag_prefix)?;
+
+        let head_ref = match repo.head() {
+            Err(e) if e.code() == ErrorCode::UnbornBranch => {
+                let head = repo.find_reference("HEAD")?;
+                let branch = head
+                    .symbolic_target()
+                    .ok()
+                    .flatten()
+                    .and_then(|t| t.strip_prefix("refs/heads/"));
+                return Err(Error::new(
+                    ErrorKind::NoCommits,
+                    match branch {
+                        Some(b) => format!("the current branch \"{b}\" has no commits"),
+                        None => "the current branch has no commits".into(),
+                    },
+                ));
             }
-            v
-        }
-        None => Version::new(0, 1, 0),
-    };
-
-    if distance > 0 {
-        let mut pre = match version.pre.as_str() {
-            "" => format!("0.{distance}"),
-            p => format!("{p}.0.{distance}"),
+            head => head?,
         };
-        let branch = match opts.branch.as_deref() {
-            Some(s) => Cow::Borrowed(s),
-            None if head_ref.is_branch() => String::from_utf8_lossy(head_ref.shorthand_bytes()),
-            None => {
-                return Err(format!(
-                    "HEAD is detached at {head_oid}; pass \"--branch\" to name the branch"
-                )
-                .into());
-            }
-        };
-        if opts.default_branch.as_deref() != Some(&*branch) {
-            pre.push('.');
-            if branch.bytes().all(|b| b.is_ascii_digit()) {
-                pre.push('b');
-            }
-            pre.extend(branch.chars().map(|c| {
-                if c.is_ascii_alphanumeric() || c == '-' {
-                    c
-                } else {
-                    '-'
-                }
-            }));
-        }
-        version.pre = Prerelease::new(&pre)?;
-    }
+        let head_commit = head_ref.peel(ObjectType::Commit)?;
+        let head_oid = head_commit.id();
 
-    let mut status_opts = StatusOptions::new();
-    let status_opts = status_opts.include_untracked(true);
-    let dirty = opts.check_dirty && !repo.is_bare() && {
-        let statuses =
-            repo.statuses(Some(status_opts))
-                .map_err(|e| -> Box<dyn std::error::Error> {
-                    if e.class() == git2::ErrorClass::Index && e.message().contains("'link'") {
-                        verbose!(opts.verbose, "libgit2 error: {e}");
-                        "repository uses a split index, which is not supported, turn it off with \
-                        \"git update-index --no-split-index\""
-                            .into()
-                    } else {
-                        e.into()
+        let (mut base, mut base_oids) = match tags.remove(&head_oid) {
+            Some(v) => (Some(v), vec![head_oid]),
+            None => (None, Vec::new()),
+        };
+        if base.is_none() && !tags.is_empty() {
+            let mut walk = repo.revwalk()?;
+            walk.push(head_oid)?;
+
+            for oid in walk {
+                if tags.is_empty() {
+                    break;
+                }
+                let oid = oid?;
+                let Some(v) = tags.remove(&oid) else {
+                    continue;
+                };
+                match base.as_ref().map(|b| v.cmp_precedence(b)) {
+                    None | Some(Ordering::Greater) => {
+                        tags.retain(|_, t| t.cmp_precedence(&v) != Ordering::Less);
+                        base = Some(v);
+                        base_oids = vec![oid];
                     }
-                })?;
-        !statuses.is_empty()
+                    Some(Ordering::Equal) => base_oids.push(oid),
+                    Some(Ordering::Less) => {}
+                }
+            }
+        }
+
+        let distance_from = |base_oid: Option<Oid>| -> Result<usize, git2::Error> {
+            let mut walk = repo.revwalk()?;
+            walk.push(head_oid)?;
+            if let Some(oid) = base_oid {
+                walk.hide(oid)?;
+            }
+            walk.try_fold(0, |n, id| id.map(|_| n + 1))
+        };
+        let distance = match base_oids.as_slice() {
+            [] => distance_from(None)?,
+            oids => oids
+                .iter()
+                .try_fold(0, |d, &oid| distance_from(Some(oid)).map(|n| d.max(n)))?,
+        };
+
+        let mut version = match base {
+            Some(mut v) => {
+                if distance > 0 && v.pre.is_empty() {
+                    v.patch = v.patch.checked_add(1).ok_or_else(|| {
+                        Error::new(
+                            ErrorKind::VersionOverflow,
+                            format!(
+                                "cannot increment the patch version of {v}, it is the maximum \
+                                value"
+                            ),
+                        )
+                    })?;
+                }
+                v
+            }
+            None => Version::new(0, 1, 0),
+        };
+
+        if distance > 0 {
+            let mut pre = match version.pre.as_str() {
+                "" => format!("0.{distance}"),
+                p => format!("{p}.0.{distance}"),
+            };
+            let branch = match self.branch.as_deref() {
+                Some(s) => Cow::Borrowed(s),
+                None if head_ref.is_branch() => String::from_utf8_lossy(head_ref.shorthand_bytes()),
+                None => {
+                    return Err(Error::new(
+                        ErrorKind::DetachedHead,
+                        format!("HEAD is detached at {head_oid}"),
+                    ));
+                }
+            };
+            if self.default_branch.as_deref() != Some(&*branch) {
+                pre.push('.');
+                if branch.bytes().all(|b| b.is_ascii_digit()) {
+                    pre.push('b');
+                }
+                pre.extend(branch.chars().map(|c| {
+                    if c.is_ascii_alphanumeric() || c == '-' {
+                        c
+                    } else {
+                        '-'
+                    }
+                }));
+            }
+            version.pre = Prerelease::new(&pre).map_err(invalid_input)?;
+        }
+
+        let mut status_opts = StatusOptions::new();
+        let status_opts = status_opts.include_untracked(true);
+        let dirty = self.check_dirty && !repo.is_bare() && {
+            let statuses = repo.statuses(Some(status_opts)).map_err(|e| {
+                if e.class() == ErrorClass::Index && e.message().contains("'link'") {
+                    log::debug!("libgit2 error: {e}");
+                    Error::with_source(
+                        ErrorKind::UnsupportedRepository,
+                        "repository uses a split index, which is not supported, turn it off with \
+                        \"git update-index --no-split-index\"",
+                        e,
+                    )
+                } else {
+                    e.into()
+                }
+            })?;
+            !statuses.is_empty()
+        };
+
+        let short_id = head_commit.short_id()?;
+        let short_id = short_id.as_str()?;
+
+        let build = if dirty {
+            format!("g{short_id}.dirty")
+        } else {
+            format!("g{short_id}")
+        };
+
+        version.build = BuildMetadata::new(&build).map_err(invalid_input)?;
+
+        Ok(version)
+    }
+}
+
+/// Opens the repository at `path` or in one of its parent directories.
+pub(crate) fn open_repository(path: &Path) -> Result<Repository, Error> {
+    let repo = match Repository::discover(path) {
+        Ok(repo) => repo,
+        Err(e) if e.message().contains("extensions.refstorage") => {
+            log::debug!("libgit2 error: {e}");
+            let message = ref_storage_error(path);
+            return Err(Error::with_source(
+                ErrorKind::UnsupportedRepository,
+                message,
+                e,
+            ));
+        }
+        Err(e) if e.code() == ErrorCode::NotFound => {
+            log::debug!("libgit2 error: {e}");
+            let message = e.message().to_owned();
+            return Err(Error::with_source(
+                ErrorKind::RepositoryNotFound,
+                message,
+                e,
+            ));
+        }
+        Err(e) => return Err(e.into()),
     };
 
-    let short_id = head_commit.short_id()?;
-    let short_id = short_id.as_str()?;
+    log::debug!("opened repository at {:?}", repo.path());
 
-    let build = if dirty {
-        format!("g{short_id}.dirty")
-    } else {
-        format!("g{short_id}")
-    };
+    Ok(repo)
+}
 
-    version.build = BuildMetadata::new(&build)?;
-
-    Ok(version)
+/// Maps an error from parsing the version to an error. The version is built
+/// from valid tags and the commit ID, so only the input can make it invalid.
+fn invalid_input(e: semver::Error) -> Error {
+    Error::new(ErrorKind::InvalidInput, e.to_string())
 }
 
 /// Explains why the repository with the unsupported `extensions.refStorage`
 /// setting cannot be opened. libgit2 rejects the setting regardless of its
 /// value, so read the value from the configuration to give the right advice.
-fn ref_storage_error(opts: &Options) -> String {
-    let value = Repository::discover_path(&opts.repository, None::<&str>)
+fn ref_storage_error(path: &Path) -> String {
+    let value = Repository::discover_path(path, None::<&str>)
         .ok()
         .and_then(|git_dir| {
             let common_dir = match fs::read_to_string(git_dir.join("commondir")) {
@@ -232,7 +310,7 @@ fn ref_storage_error(opts: &Options) -> String {
                 .and_then(|c| c.get_string("extensions.refStorage"))
                 .ok()
         });
-    verbose!(opts.verbose, "extensions.refStorage is {value:?}");
+    log::debug!("extensions.refStorage is {value:?}");
 
     match value.as_deref() {
         Some("reftable") => {
@@ -255,77 +333,63 @@ fn ref_storage_error(opts: &Options) -> String {
     }
 }
 
-fn collect_tags(
-    repo: &Repository,
-    prefix: &str,
-    verbose: bool,
-) -> Result<HashMap<Oid, Version>, Box<dyn std::error::Error>> {
+fn collect_tags(repo: &Repository, prefix: &str) -> Result<HashMap<Oid, Version>, Error> {
     let mut tags = HashMap::new();
 
     for reference in repo.references_glob("refs/tags/*")? {
         let reference = reference?;
         let Ok(tag) = reference.shorthand() else {
-            verbose!(
-                verbose,
+            log::debug!(
                 "skipping tag {:?}, name not valid UTF-8",
                 String::from_utf8_lossy(reference.shorthand_bytes())
             );
             continue;
         };
         let Some(name) = tag.strip_prefix(prefix) else {
-            verbose!(
-                verbose,
-                "skipping tag {tag:?}, name does not start with the prefix {prefix:?}"
-            );
+            log::debug!("skipping tag {tag:?}, name does not start with the prefix {prefix:?}");
             continue;
         };
         let version = match Version::parse(name) {
             Ok(v) => v,
             Err(e) => {
-                verbose!(
-                    verbose,
-                    "skipping tag {tag:?}, {name:?} is not a valid version number: {e}"
-                );
+                log::debug!("skipping tag {tag:?}, {name:?} is not a valid version number: {e}");
                 continue;
             }
         };
         let target = reference.peel(ObjectType::Any).map_err(|e| {
-            verbose!(verbose, "libgit2 error: {e}");
-            if e.code() == ErrorCode::NotFound {
+            log::debug!("libgit2 error: {e}");
+            let message = if e.code() == ErrorCode::NotFound {
                 format!(
                     "tag \"{tag}\" points to an object that is missing from the repository, fetch \
                     the object or delete the tag with \"git tag -d {tag}\""
                 )
             } else {
                 format!("failed to read tag \"{tag}\": {}", e.message())
-            }
+            };
+            Error::with_source(ErrorKind::InvalidTag, message, e)
         })?;
         let Some(commit) = target.as_commit() else {
-            verbose!(
-                verbose,
+            log::debug!(
                 "skipping tag {tag:?}, it points to {} instead of commit",
                 target.kind().map_or("unknown object", |k| k.str())
             );
             continue;
         };
-        verbose!(
-            verbose,
+        log::debug!(
             "found version {version} from tag {tag:?} on commit {}",
             commit.id()
         );
         match tags.entry(commit.id()) {
             Entry::Occupied(mut entry) => {
                 if version > *entry.get() {
-                    verbose!(
-                        verbose,
+                    log::debug!(
                         "version {version} replaces {} on commit {}",
                         entry.get(),
                         commit.id()
                     );
                     entry.insert(version);
                 } else {
-                    verbose!(
-                        verbose,
+                    log::debug!(
                         "ignoring version {version}, commit {} already has {}",
                         commit.id(),
                         entry.get()
@@ -343,169 +407,14 @@ fn collect_tags(
 
 #[cfg(test)]
 mod tests {
-    use std::{cmp::Ordering, fs, path::Path, process::Command, sync::Once};
+    use std::{cmp::Ordering, error::Error as _, fs};
 
-    use git2::{Commit, ConfigLevel, Signature, Time};
     use tempfile::TempDir;
 
-    use super::*;
-
-    fn isolate_libgit2_config() {
-        static ISOLATE: Once = Once::new();
-        ISOLATE.call_once(|| {
-            for level in [
-                ConfigLevel::System,
-                ConfigLevel::Global,
-                ConfigLevel::XDG,
-                ConfigLevel::ProgramData,
-            ] {
-                // SAFETY: Every test creates a `TestRepo` before it uses
-                // libgit2, and `Once` blocks the other tests until the search
-                // paths are set, so nothing reads them concurrently.
-                unsafe { git2::opts::set_search_path(level, "") }
-                    .expect("failed to clear the libgit2 search path");
-            }
-        });
-    }
-
-    struct TestRepo {
-        dir: TempDir,
-    }
-
-    impl TestRepo {
-        fn new() -> Self {
-            Self::init(&[])
-        }
-
-        fn init(args: &[&str]) -> Self {
-            isolate_libgit2_config();
-            let repo = Self {
-                dir: TempDir::new().expect("failed to create temporary directory"),
-            };
-            let mut init = vec!["init", "--initial-branch=main"];
-            init.extend_from_slice(args);
-            repo.git(&init);
-            repo
-        }
-
-        fn path(&self) -> &Path {
-            self.dir.path()
-        }
-
-        fn options(&self) -> Options {
-            Options {
-                verbose: false,
-                check_dirty: true,
-                branch: None,
-                default_branch: None,
-                repository: self.path().to_path_buf(),
-                tag_prefix: None,
-            }
-        }
-
-        fn git(&self, args: &[&str]) {
-            let mut cmd = Command::new("git");
-            for (key, _) in env::vars_os() {
-                if key.to_str().is_some_and(|k| k.starts_with("GIT_")) {
-                    cmd.env_remove(key);
-                }
-            }
-            let output = cmd
-                .env("GIT_CONFIG_GLOBAL", "/dev/null")
-                .env("GIT_CONFIG_NOSYSTEM", "1")
-                .args(["-c", "user.name=Test", "-c", "user.email=test@example.com"])
-                .args(["-c", "commit.gpgSign=false", "-c", "tag.gpgSign=false"])
-                .arg("-C")
-                .arg(self.path())
-                .args(args)
-                .output()
-                .expect("failed to run git");
-            assert!(
-                output.status.success(),
-                "git {args:?} failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
-
-        fn commit(&self, message: &str) {
-            self.git(&["commit", "--allow-empty", "-m", message]);
-        }
-
-        fn commit_many(&self, n: usize) {
-            for i in 0..n {
-                self.commit(&format!("commit {i}"));
-            }
-        }
-
-        fn commit_all(&self, message: &str) {
-            self.git(&["add", "--all"]);
-            self.commit(message);
-        }
-
-        fn commit_fast_forward(&self, n: usize) {
-            let repo = Repository::open(self.path()).unwrap();
-            let tree_oid = repo.treebuilder(None).unwrap().write().unwrap();
-            let tree = repo.find_tree(tree_oid).unwrap();
-            let sig =
-                Signature::new("Test", "test@example.com", &Time::new(1735689600, 0)).unwrap();
-
-            let mut parent = repo.head().ok().map(|head| head.peel_to_commit().unwrap());
-            for i in 0..n {
-                let parents: Vec<&Commit> = parent.iter().collect();
-                let oid = repo
-                    .commit(None, &sig, &sig, &format!("commit {i}"), &tree, &parents)
-                    .unwrap();
-                parent = Some(repo.find_commit(oid).unwrap());
-            }
-
-            let head = parent.expect("no commits were created").id();
-            repo.reference("refs/heads/main", head, true, "fast-forward")
-                .unwrap();
-        }
-
-        /// Creates a commit with the given parents and commit time without
-        /// updating any references, so that the tests control the order in
-        /// which the commits are walked.
-        fn commit_at(&self, parents: &[Oid], time: i64) -> Oid {
-            let repo = Repository::open(self.path()).unwrap();
-            let tree_oid = repo.treebuilder(None).unwrap().write().unwrap();
-            let tree = repo.find_tree(tree_oid).unwrap();
-            let sig = Signature::new("Test", "test@example.com", &Time::new(time, 0)).unwrap();
-            let parents: Vec<Commit> = parents
-                .iter()
-                .map(|&oid| repo.find_commit(oid).unwrap())
-                .collect();
-            let parents: Vec<&Commit> = parents.iter().collect();
-            repo.commit(None, &sig, &sig, "commit", &tree, &parents)
-                .unwrap()
-        }
-
-        fn tag(&self, name: &str) {
-            self.git(&["tag", "-a", name, "-m", name]);
-        }
-
-        fn write_file(&self, name: &str, contents: &str) {
-            fs::write(self.path().join(name), contents).unwrap();
-        }
-
-        fn make_dirty(&self) {
-            self.write_file("dirty.txt", "uncommitted changes\n");
-        }
-
-        fn short_head_id(&self) -> String {
-            let repo = Repository::open(self.path()).unwrap();
-            let head = repo.head().unwrap().peel(ObjectType::Commit).unwrap();
-            head.short_id().unwrap().as_str().unwrap().to_owned()
-        }
-
-        fn resolve(&self) -> Version {
-            self.resolve_with(&self.options())
-        }
-
-        fn resolve_with(&self, opts: &Options) -> Version {
-            from_git(opts).unwrap_or_else(|e| panic!("failed to resolve version: {e}"))
-        }
-    }
+    use super::{
+        super::test_support::{TestRepo, isolate_libgit2_config},
+        *,
+    };
 
     #[track_caller]
     fn assert_version(actual: &Version, expected: &str) {
@@ -644,7 +553,8 @@ mod tests {
         assert_version(&repo.resolve(), "1.0.18446744073709551615");
 
         repo.commit("commit");
-        let err = from_git(&repo.options()).unwrap_err();
+        let err = repo.resolver().resolve().unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::VersionOverflow);
         assert_eq!(
             err.to_string(),
             "cannot increment the patch version of 1.0.18446744073709551615, it is the maximum \
@@ -707,62 +617,50 @@ mod tests {
     #[test]
     fn dirty_check_disabled() {
         let repo = TestRepo::new();
-        let opts = Options {
-            check_dirty: false,
-            ..repo.options()
-        };
+        let resolver = repo.resolver().check_dirty(false);
 
         repo.commit("commit");
         repo.make_dirty();
-        let version = repo.resolve_with(&opts);
+        let version = repo.resolve_with(&resolver);
         assert_eq!(version.build.as_str(), format!("g{}", repo.short_head_id()));
     }
 
     #[test]
     fn tag_prefix() {
         let repo = TestRepo::new();
-        let opts = Options {
-            tag_prefix: Some("v".into()),
-            ..repo.options()
-        };
+        let resolver = repo.resolver().tag_prefix("v");
 
         repo.commit("commit");
         repo.tag("v1.0.0");
-        assert_version(&repo.resolve_with(&opts), "1.0.0");
+        assert_version(&repo.resolve_with(&resolver), "1.0.0");
 
         repo.commit_many(10);
-        assert_version(&repo.resolve_with(&opts), "1.0.1-0.10.main");
+        assert_version(&repo.resolve_with(&resolver), "1.0.1-0.10.main");
 
         repo.tag("1.0.1");
-        assert_version(&repo.resolve_with(&opts), "1.0.1-0.10.main");
+        assert_version(&repo.resolve_with(&resolver), "1.0.1-0.10.main");
 
         repo.commit("commit");
         repo.tag("v1.0.1");
-        assert_version(&repo.resolve_with(&opts), "1.0.1");
+        assert_version(&repo.resolve_with(&resolver), "1.0.1");
     }
 
     #[test]
     fn default_branch() {
         let repo = TestRepo::new();
-        let opts = Options {
-            default_branch: Some("main".into()),
-            ..repo.options()
-        };
+        let resolver = repo.resolver().default_branch("main");
 
         repo.commit("commit");
-        assert_version(&repo.resolve_with(&opts), "0.1.0-0.1");
+        assert_version(&repo.resolve_with(&resolver), "0.1.0-0.1");
     }
 
     #[test]
     fn manual_branch() {
         let repo = TestRepo::new();
-        let opts = Options {
-            branch: Some("branch".into()),
-            ..repo.options()
-        };
+        let resolver = repo.resolver().branch("branch");
 
         repo.commit("commit");
-        assert_version(&repo.resolve_with(&opts), "0.1.0-0.1.branch");
+        assert_version(&repo.resolve_with(&resolver), "0.1.0-0.1.branch");
     }
 
     #[test]
@@ -777,11 +675,8 @@ mod tests {
             ("123", "0.1.0-0.1.b123"),
             ("007", "0.1.0-0.1.b007"),
         ] {
-            let opts = Options {
-                branch: Some(branch.into()),
-                ..repo.options()
-            };
-            assert_version(&repo.resolve_with(&opts), expected);
+            let resolver = repo.resolver().branch(branch);
+            assert_version(&repo.resolve_with(&resolver), expected);
         }
 
         repo.git(&["checkout", "-b", "feature/y"]);
@@ -813,14 +708,10 @@ mod tests {
     #[test]
     fn default_and_manual_branch() {
         let repo = TestRepo::new();
-        let opts = Options {
-            branch: Some("master".into()),
-            default_branch: Some("master".into()),
-            ..repo.options()
-        };
+        let resolver = repo.resolver().branch("master").default_branch("master");
 
         repo.commit("commit");
-        assert_version(&repo.resolve_with(&opts), "0.1.0-0.1");
+        assert_version(&repo.resolve_with(&resolver), "0.1.0-0.1");
     }
 
     #[test]
@@ -848,11 +739,8 @@ mod tests {
         ]);
 
         for path in [clone.path(), &worktree_path] {
-            let opts = Options {
-                repository: path.to_path_buf(),
-                ..repo.options()
-            };
-            let err = from_git(&opts).unwrap_err();
+            let err = Resolver::new(path).resolve().unwrap_err();
+            assert_eq!(err.kind(), ErrorKind::ShallowClone, "{path:?}");
             assert!(
                 err.to_string().contains("git fetch --unshallow --tags"),
                 "unexpected error for {path:?}: {err}"
@@ -867,11 +755,8 @@ mod tests {
         repo.commit("commit");
         repo.tag("1.0.0");
         fs::create_dir(repo.path().join("sub")).unwrap();
-        let opts = Options {
-            repository: repo.path().join("sub"),
-            ..repo.options()
-        };
-        assert_version(&repo.resolve_with(&opts), "1.0.0");
+        let resolver = Resolver::new(repo.path().join("sub"));
+        assert_version(&repo.resolve_with(&resolver), "1.0.0");
     }
 
     #[test]
@@ -886,20 +771,30 @@ mod tests {
         let bare_path = bare.path().to_str().unwrap();
         repo.git(&["clone", "--bare", ".", bare_path]);
 
-        let opts = Options {
-            repository: bare.path().to_path_buf(),
-            ..repo.options()
-        };
-        let version = repo.resolve_with(&opts);
+        let resolver = Resolver::new(bare.path());
+        let version = repo.resolve_with(&resolver);
         assert_version(&version, "1.0.1-0.1.main");
         assert_clean(&version);
+    }
+
+    #[test]
+    fn repository_not_found() {
+        isolate_libgit2_config();
+        let dir = TempDir::new().unwrap();
+
+        for path in [dir.path().to_path_buf(), dir.path().join("missing")] {
+            let err = Resolver::new(&path).resolve().unwrap_err();
+            assert_eq!(err.kind(), ErrorKind::RepositoryNotFound, "{path:?}: {err}");
+            assert!(err.source().is_some(), "{path:?}");
+        }
     }
 
     #[test]
     fn no_commits() {
         let repo = TestRepo::new();
 
-        let err = from_git(&repo.options()).unwrap_err();
+        let err = repo.resolver().resolve().unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::NoCommits);
         assert_eq!(
             err.to_string(),
             "the current branch \"main\" has no commits"
@@ -914,7 +809,8 @@ mod tests {
         repo.tag("1.0.0");
         repo.git(&["checkout", "--orphan", "orphan"]);
 
-        let err = from_git(&repo.options()).unwrap_err();
+        let err = repo.resolver().resolve().unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::NoCommits);
         assert_eq!(
             err.to_string(),
             "the current branch \"orphan\" has no commits"
@@ -927,13 +823,37 @@ mod tests {
 
         repo.commit_many(2);
         repo.git(&["checkout", "--detach", "HEAD~1"]);
-        assert!(from_git(&repo.options()).is_err());
+        let err = repo.resolver().resolve().unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::DetachedHead);
+        assert_eq!(
+            err.to_string(),
+            format!("HEAD is detached at {}", repo.head_id())
+        );
 
-        let opts = Options {
-            branch: Some("main".into()),
-            ..repo.options()
-        };
-        assert_version(&repo.resolve_with(&opts), "0.1.0-0.1.main");
+        let resolver = repo.resolver().branch("main");
+        assert_version(&repo.resolve_with(&resolver), "0.1.0-0.1.main");
+    }
+
+    #[test]
+    fn detached_head_at_tag() {
+        let repo = TestRepo::new();
+
+        repo.commit("commit");
+        repo.tag("1.0.0");
+        repo.commit("commit");
+        repo.git(&["checkout", "--detach", "1.0.0"]);
+        assert_version(&repo.resolve(), "1.0.0");
+    }
+
+    #[test]
+    fn empty_branch_is_rejected() {
+        let repo = TestRepo::new();
+
+        repo.commit("commit");
+        repo.tag("1.0.0");
+        let err = repo.resolver().branch("").resolve().unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidInput);
+        assert_eq!(err.to_string(), "branch name cannot be empty");
     }
 
     #[test]
@@ -1094,6 +1014,7 @@ mod tests {
         assert_version(&repo.resolve(), "1.0.1-0.4.main");
     }
 
+    #[cfg(feature = "sha256")]
     #[test]
     fn sha256_repository() {
         let repo = TestRepo::init(&["--object-format=sha256"]);
@@ -1120,7 +1041,8 @@ mod tests {
         let repo = TestRepo::init(&["--ref-format=reftable"]);
 
         repo.commit("commit");
-        let err = from_git(&repo.options()).unwrap_err();
+        let err = repo.resolver().resolve().unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::UnsupportedRepository);
         assert!(
             err.to_string().contains("reftable format")
                 && err
@@ -1137,7 +1059,8 @@ mod tests {
         repo.write_file("file.txt", "contents\n");
         repo.commit_all("commit");
         repo.git(&["update-index", "--split-index"]);
-        let err = from_git(&repo.options()).unwrap_err();
+        let err = repo.resolver().resolve().unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::UnsupportedRepository);
         assert!(
             err.to_string()
                 .contains("git update-index --no-split-index"),
@@ -1155,7 +1078,8 @@ mod tests {
         repo.commit("commit");
         repo.git(&["config", "core.repositoryFormatVersion", "1"]);
         repo.git(&["config", "extensions.refStorage", "files"]);
-        let err = from_git(&repo.options()).unwrap_err();
+        let err = repo.resolver().resolve().unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::UnsupportedRepository);
         assert!(
             err.to_string()
                 .contains("git config --unset extensions.refStorage")
@@ -1210,24 +1134,18 @@ mod tests {
     #[test]
     fn prefixed_tags_require_tag_prefix() {
         let repo = TestRepo::new();
-        let opts = Options {
-            tag_prefix: Some("v".into()),
-            ..repo.options()
-        };
+        let resolver = repo.resolver().tag_prefix("v");
 
         repo.commit("commit");
         repo.tag("v1.0.0");
         assert_version(&repo.resolve(), "0.1.0-0.1.main");
-        assert_version(&repo.resolve_with(&opts), "1.0.0");
+        assert_version(&repo.resolve_with(&resolver), "1.0.0");
     }
 
     #[test]
     fn prefixed_non_version_tags_are_ignored() {
         let repo = TestRepo::new();
-        let opts = Options {
-            tag_prefix: Some("v".into()),
-            ..repo.options()
-        };
+        let resolver = repo.resolver().tag_prefix("v");
 
         repo.commit("commit");
         repo.tag("v1.0.0");
@@ -1235,7 +1153,7 @@ mod tests {
         repo.tag("very-old");
         repo.tag("vnext");
         repo.tag("v2");
-        assert_version(&repo.resolve_with(&opts), "1.0.1-0.1.main");
+        assert_version(&repo.resolve_with(&resolver), "1.0.1-0.1.main");
     }
 
     #[test]
@@ -1282,7 +1200,8 @@ mod tests {
         assert_version(&repo.resolve(), "1.0.0");
 
         fs::write(repo.path().join(".git/refs/tags/2.0.0"), missing).unwrap();
-        let err = from_git(&repo.options()).unwrap_err();
+        let err = repo.resolver().resolve().unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidTag);
         assert_eq!(
             err.to_string(),
             "tag \"2.0.0\" points to an object that is missing from the repository, fetch the \
