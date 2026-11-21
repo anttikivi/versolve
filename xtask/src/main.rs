@@ -8,15 +8,14 @@ use std::{
     process::{self, Command},
 };
 
+const REUSE: &str = "--from=reuse[charset-normalizer]==6.3.0";
+
 type Result<T = ()> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 fn run() -> Result {
     let mut it = env::args().skip(1);
     match it.next().as_deref() {
-        Some("reuse") => sh(
-            "uvx",
-            &["--from=reuse[charset-normalizer]", "reuse", "lint"],
-        ),
+        Some("reuse") => sh("uvx", &[REUSE, "reuse", "lint"]),
         Some("reuse-annotate") => {
             reuse_annotate(&[
                 "--recursive",
@@ -65,7 +64,7 @@ fn sh(prog: &str, args: &[&str]) -> Result {
 
 fn reuse_annotate(args: &[&str]) -> Result {
     let mut all = vec![
-        "--from=reuse[charset-normalizer]",
+        REUSE,
         "reuse",
         "annotate",
         "--copyright=Antti Kivi <antti@anttikivi.com>",
