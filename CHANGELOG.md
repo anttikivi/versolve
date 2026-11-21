@@ -50,6 +50,8 @@ and this project adheres to
   verbose output to the standard error fails.
 - Stop rerunning the build script on every build in a Git checkout that has no
   `packed-refs` file.
+- Warn when the build cannot open the Git repository it is built from instead of
+  silently embedding the version from `Cargo.toml`.
 - Update the version embedded in the build when the Git configuration changes,
   as `core.abbrev` sets the length of the abbreviated commit ID.
 - Refuse to run in a linked worktree of a shallow clone, as in the main working

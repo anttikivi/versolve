@@ -4,7 +4,7 @@
 
 use std::{env, error::Error, path::Path};
 
-use git2::{Config, Repository};
+use git2::{Config, ErrorCode, Repository};
 
 macro_rules! verbose {
     ($enabled:expr, $($args:tt)*) => {
@@ -62,7 +62,15 @@ fn main() {
                 env::var("CARGO_PKG_VERSION").unwrap()
             })
         }
-        Err(_) => env::var("CARGO_PKG_VERSION").unwrap(),
+        Err(e) => {
+            if e.code() != ErrorCode::NotFound {
+                println!(
+                    "cargo::warning=failed to open the repository to resolve the version: {}",
+                    e.message()
+                );
+            }
+            env::var("CARGO_PKG_VERSION").unwrap()
+        }
     };
 
     println!("cargo::rustc-env=VERSOLVE_VERSION={version}");
