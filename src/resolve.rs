@@ -552,11 +552,11 @@ mod tests {
     fn no_tags_many_commits() {
         let repo = TestRepo::new();
 
-        repo.commit_fast_forward(12_345);
-        assert_version(&repo.resolve(), "0.1.0-0.12345.main");
+        repo.commit_fast_forward(2345);
+        assert_version(&repo.resolve(), "0.1.0-0.2345.main");
 
         repo.commit_fast_forward(3000);
-        assert_version(&repo.resolve(), "0.1.0-0.15345.main");
+        assert_version(&repo.resolve(), "0.1.0-0.5345.main");
     }
 
     #[test]
