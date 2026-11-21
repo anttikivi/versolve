@@ -44,6 +44,8 @@ and this project adheres to
   verbose output to the standard error fails.
 - Stop rerunning the build script on every build in a Git checkout that has no
   `packed-refs` file.
+- Update the version embedded in the build when the Git configuration changes,
+  as `core.abbrev` sets the length of the abbreviated commit ID.
 - Use the closest of the reachable tags with equal precedence, as documented,
   instead of a tag chosen by the order of the commit times when the tags are on
   different branches.

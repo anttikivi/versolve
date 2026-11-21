@@ -4,7 +4,7 @@
 
 use std::{env, error::Error, path::Path};
 
-use git2::Repository;
+use git2::{Config, Repository};
 
 macro_rules! verbose {
     ($enabled:expr, $($args:tt)*) => {
@@ -42,6 +42,16 @@ fn main() {
             let packed_refs = repo.commondir().join("packed-refs");
             if packed_refs.exists() {
                 println!("cargo::rerun-if-changed={}", packed_refs.display());
+            }
+            let configs = [
+                Ok(repo.commondir().join("config")),
+                Ok(repo.path().join("config.worktree")),
+                Config::find_global(),
+                Config::find_xdg(),
+                Config::find_system(),
+            ];
+            for path in configs.into_iter().flatten().filter(|p| p.exists()) {
+                println!("cargo::rerun-if-changed={}", path.display());
             }
             for path in ["build.rs", "Cargo.toml"] {
                 println!("cargo::rerun-if-changed={path}");
