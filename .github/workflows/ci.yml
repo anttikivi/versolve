@@ -40,7 +40,8 @@ jobs:
       - name: Check the embedded version
         shell: bash
         run: |
-          embedded="$(./target/debug/versolve --verbose --version)"
+          output="$(./target/debug/versolve --verbose --version)"
+          embedded="${output%%$'\n'*}"
           resolved="versolve $(./target/debug/versolve -T v -B master -b "${VERSOLVE_BUILD_BRANCH}")"
           echo "embedded: ${embedded}"
           echo "resolved: ${resolved}"

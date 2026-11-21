@@ -11,6 +11,7 @@ and this project adheres to
 ### Changed
 
 - Print the build metadata with `--version` only when verbose output is enabled.
+- Print the license information with `--version`.
 
 ## [0.2.0] - 2026-11-21
 

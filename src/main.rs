@@ -76,6 +76,12 @@ fn run(args: args::Args) -> Result<(), Box<dyn std::error::Error>> {
         } else {
             print_line(format_args!("versolve {stripped_version}"))?;
         }
+        print_line("Copyright (C) 2026 Antti Kivi")?;
+        print_line(
+            "License GPL-3.0-or-later: GNU GPL version 3 or later <https://gnu.org/licenses/gpl.html>",
+        )?;
+        print_line("This is free software: you are free to change and redistribute it.")?;
+        print_line("There is NO WARRANTY, to the extent permitted by law.")?;
         return Ok(());
     }
 
