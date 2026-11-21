@@ -13,11 +13,12 @@ and this project adheres to
 - A library API for resolving versions from Rust code: `Resolver`, `Error`, and
   `ErrorKind`. The version is a `semver::Version`, and the `semver` crate is
   re-exported.
-- Debug messages from the library through the `log` crate.
+- The library logs debug messages with the `log` crate.
 - The `versolve::build` module for embedding the resolved version in a package
   from its build script.
-- The `sha256` and `vendored-libgit2` features, both on by default, to turn off
-  SHA-256 support and building the bundled libgit2.
+- The `sha256` and `vendored-libgit2` features, both on by default, so that
+  SHA-256 support and the bundled libgit2 can be left out. With the default
+  features, libgit2 is still always built from the bundled sources.
 
 ### Changed
 
@@ -25,6 +26,9 @@ and this project adheres to
   License, Version 2.0, at your option. Earlier releases remain under the GNU
   General Public License v3.0 or later.
 - Print the build metadata with `--version` only when verbose output is enabled.
+- When building from source, the build script also finds the repository from the
+  parent directories, but leaves out packaged crates and directories that the
+  repository ignores.
 
 ### Fixed
 
