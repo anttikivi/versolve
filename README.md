@@ -81,18 +81,23 @@ later release: `1.2.3` < `1.2.4-0.3` < `1.2.4-0.4` < `1.2.4`, and `2.0.0-rc.1` <
 `2.0.0-rc.1.0.2` < `2.0.0-rc.2`.
 
 > [!NOTE]
-> This ordering holds as long as each new tag has a higher version than the
-> versions of the commits it is based on and the first version tag is at least
-> `0.1.0`. Versolve does not check this. For example, tagging a commit `0.0.1`
-> after untagged commits that resolved to `0.1.0-0.<distance>` gives that commit
-> a lower version than its parent.
+> This ordering holds as long as each version tag has a higher version than the
+> commits it is based on and than every commit, on any branch, whose latest tag
+> is lower than it. Otherwise, merging the tagged commit into such a branch
+> gives the merge commit a lower version than its other parent. Versolve does
+> not check this. In practice, avoid these tags:
 >
-> A tag that is higher than the previous tag can still be lower than the commits
-> between them. After `1.2.3`, a pre-release tag that starts with `0`, such as
-> `1.2.4-0.1`, can sort before `1.2.4-0.<distance>`. After `2.0.0-rc.1`, a tag
-> such as `2.0.0-rc.1.0` or `2.0.0-rc.1.0.1` can sort before
-> `2.0.0-rc.1.0.<distance>`. Tags such as `1.2.4-rc.1`, `1.2.4`, and
-> `2.0.0-rc.2` are safe.
+> - Tags lower than `0.1.0`, such as `0.0.1`, as commits without version tags
+>   resolve to `0.1.0-0.<distance>`.
+> - Pre-release tags that start with `0`, such as `1.2.4-0.1`, as after `1.2.3`
+>   commits resolve to `1.2.4-0.<distance>`, which can sort after the tag.
+> - Tags that extend a lower pre-release tag with `.0`, such as `2.0.0-rc.1.0`
+>   or `2.0.0-rc.1.0.1`, as after `2.0.0-rc.1` commits resolve to
+>   `2.0.0-rc.1.0.<distance>`, which can sort after the tag.
+>
+> For example, if `main` resolves to `1.2.4-0.4` and a branch with the tag
+> `1.2.4-0.1` is merged into it, the merge commit resolves to `1.2.4-0.1.0.5`.
+> Tags such as `1.2.4-rc.1`, `1.2.4`, and `2.0.0-rc.2` are safe.
 
 ### Branches
 
