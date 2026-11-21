@@ -1,6 +1,7 @@
 version = 1
 
 [[annotations]]
-path = ["CHANGELOG.md", "README.md", "renovate.json"]
+path = "**"
+precedence = "override"
 SPDX-FileCopyrightText = "© 2026 Antti Kivi <antti@anttikivi.com>"
-SPDX-License-Identifier = "GPL-3.0-or-later"
+SPDX-License-Identifier = "MIT OR Apache-2.0"

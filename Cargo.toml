@@ -1,14 +1,10 @@
-# SPDX-FileCopyrightText: (C) 2026 Antti Kivi <antti@anttikivi.com>
-#
-# SPDX-License-Identifier: GPL-3.0-or-later
-
 [package]
 name = "versolve"
 version = "0.3.0-dev"
 edition = "2024"
 rust-version = "1.88.0"
 description = "Resolve unique semantic version numbers for Git revisions"
-license = "GPL-3.0-or-later"
+license = "MIT OR Apache-2.0"
 repository = "https://github.com/anttikivi/versolve"
 exclude = [".cargo", ".github", "renovate.json"]
 

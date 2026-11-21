@@ -10,8 +10,10 @@ and this project adheres to
 
 ### Changed
 
+- Versolve is now licensed under either of the MIT license or the Apache
+  License, Version 2.0, at your option. Earlier releases remain under the GNU
+  General Public License v3.0 or later.
 - Print the build metadata with `--version` only when verbose output is enabled.
-- Print the license information with `--version`.
 
 ## [0.2.0] - 2026-11-21
 

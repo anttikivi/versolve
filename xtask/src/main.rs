@@ -1,7 +1,3 @@
-// SPDX-FileCopyrightText: (C) 2026 Antti Kivi <antti@anttikivi.com>
-//
-// SPDX-License-Identifier: GPL-3.0-or-later
-
 use std::{
     env,
     path::{Path, PathBuf},
@@ -16,24 +12,8 @@ fn run() -> Result {
     let mut it = env::args().skip(1);
     match it.next().as_deref() {
         Some("reuse") => sh("uvx", &[REUSE, "reuse", "lint"]),
-        Some("reuse-annotate") => {
-            reuse_annotate(&[
-                "--recursive",
-                ".github",
-                "src",
-                "tests",
-                "xtask/src",
-                ".cargo/config.toml",
-                ".gitignore",
-                "build.rs",
-                "Cargo.toml",
-                "deny.toml",
-                "xtask/Cargo.toml",
-            ])?;
-            reuse_annotate(&["--force-dot-license", "Cargo.lock"])
-        }
         _ => {
-            eprintln!("usage: cargo xtask <reuse|reuse-annotate>");
+            eprintln!("usage: cargo xtask reuse");
             process::exit(2)
         }
     }
@@ -60,17 +40,4 @@ fn sh(prog: &str, args: &[&str]) -> Result {
         return Err(format!("`{prog}` failed with {status}").into());
     }
     Ok(())
-}
-
-fn reuse_annotate(args: &[&str]) -> Result {
-    let mut all = vec![
-        REUSE,
-        "reuse",
-        "annotate",
-        "--copyright=Antti Kivi <antti@anttikivi.com>",
-        "--license=GPL-3.0-or-later",
-        "--copyright-prefix=spdx-c",
-    ];
-    all.extend_from_slice(args);
-    sh("uvx", &all)
 }
