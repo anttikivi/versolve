@@ -792,6 +792,7 @@ mod tests {
         assert_version(&repo.resolve(), "0.1.0-0.1.feature-y");
     }
 
+    #[cfg(unix)]
     #[test]
     fn non_utf8_branch_name() {
         let repo = TestRepo::new();
