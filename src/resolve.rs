@@ -69,7 +69,7 @@ fn resolve_from_git(opts: &Options) -> Result<Version, Box<dyn std::error::Error
     verbose!(opts.verbose, "opened repository at {:?}", repo.path());
 
     let shallow_in_commondir =
-        || std::fs::metadata(repo.commondir().join("shallow")).is_ok_and(|m| m.len() > 0);
+        || fs::metadata(repo.commondir().join("shallow")).is_ok_and(|m| m.len() > 0);
     if repo.is_shallow() || shallow_in_commondir() {
         return Err(
             "repository is a shallow clone and its history may be incomplete, fetch the full \

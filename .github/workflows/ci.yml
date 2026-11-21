@@ -48,8 +48,13 @@ jobs:
   msrv:
     name: msrv
     runs-on: ubuntu-latest
+    env:
+      VERSOLVE_BUILD_BRANCH: ${{ github.head_ref || github.ref_name }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
       - name: Install the minimum supported Rust version
         run: |
           msrv="$(cargo metadata --no-deps --format-version 1 \
