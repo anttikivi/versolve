@@ -97,8 +97,11 @@ fn resolve_from_git(opts: &Options) -> Result<Version, Box<dyn std::error::Error
     let head_oid = head_commit.id();
 
     // A tag on the current commit is always used as is, even if a reachable tag
-    // has a higher version.
-    let mut base = tags.remove(&head_oid).map(|v| (head_oid, v));
+    // has a higher version. The base tags all have the same precedence.
+    let (mut base, mut base_oids) = match tags.remove(&head_oid) {
+        Some(v) => (Some(v), vec![head_oid]),
+        None => (None, Vec::new()),
+    };
     if base.is_none() && !tags.is_empty() {
         let mut walk = repo.revwalk()?;
         walk.push(head_oid)?;
@@ -115,32 +118,39 @@ fn resolve_from_git(opts: &Options) -> Result<Version, Box<dyn std::error::Error
             let Some(v) = tags.remove(&oid) else {
                 continue;
             };
-            let replace = match &base {
-                None => true,
-                Some((base_oid, b)) => match v.cmp_precedence(b) {
-                    Ordering::Greater => true,
-                    Ordering::Equal => repo.graph_descendant_of(oid, *base_oid)?,
-                    Ordering::Less => false,
-                },
-            };
-            if replace {
-                // The base only gets higher, so tags with a lower version can
-                // never replace it.
-                tags.retain(|_, t| t.cmp_precedence(&v) != Ordering::Less);
-                base = Some((oid, v));
+            match base.as_ref().map(|b| v.cmp_precedence(b)) {
+                None | Some(Ordering::Greater) => {
+                    // The base only gets higher, so tags with a lower version
+                    // can never replace it.
+                    tags.retain(|_, t| t.cmp_precedence(&v) != Ordering::Less);
+                    base = Some(v);
+                    base_oids = vec![oid];
+                }
+                Some(Ordering::Equal) => base_oids.push(oid),
+                Some(Ordering::Less) => {}
             }
         }
     }
 
-    let mut walk = repo.revwalk()?;
-    walk.push(head_oid)?;
-    if let Some((oid, _)) = &base {
-        walk.hide(*oid)?;
-    }
-    let distance = walk.try_fold(0usize, |n, id| id.map(|_| n + 1))?;
+    let distance_from = |base_oid: Option<Oid>| -> Result<usize, git2::Error> {
+        let mut walk = repo.revwalk()?;
+        walk.push(head_oid)?;
+        if let Some(oid) = base_oid {
+            walk.hide(oid)?;
+        }
+        walk.try_fold(0, |n, id| id.map(|_| n + 1))
+    };
+    // Tags with equal precedence give the same version apart from the distance,
+    // so use the one closest to the current commit.
+    let distance = match base_oids.as_slice() {
+        [] => distance_from(None)?,
+        oids => oids.iter().try_fold(usize::MAX, |d, &oid| {
+            distance_from(Some(oid)).map(|n| d.min(n))
+        })?,
+    };
 
     let mut version = match base {
-        Some((_, mut v)) => {
+        Some(mut v) => {
             if distance > 0 && v.pre.is_empty() {
                 v.patch = v.patch.checked_add(1).ok_or_else(|| {
                     format!("cannot increment the patch version of {v}, it is the maximum value")
@@ -921,6 +931,31 @@ mod tests {
         repo.git(&["tag", "1.0.0+b", &descendant.to_string()]);
         repo.git(&["update-ref", "refs/heads/main", &merge.to_string()]);
         assert_version(&repo.resolve(), "1.0.1-0.1.main");
+    }
+
+    #[test]
+    fn closest_equal_tag_on_parallel_branch() {
+        // The tag on the longer branch is closer to the merge, as fewer commits
+        // are reachable only from the merge. Which tag is walked to first
+        // depends on the commit times and the order of the parents.
+        for (near_time, far_time) in [(1735689610, 1735689650), (1735689650, 1735689610)] {
+            for near_first in [true, false] {
+                let repo = TestRepo::new();
+
+                let root = repo.commit_at(&[], 1735689600);
+                let mut near = root;
+                for i in 0..3 {
+                    near = repo.commit_at(&[near], near_time + i);
+                }
+                let far = repo.commit_at(&[root], far_time);
+                let parents = if near_first { [near, far] } else { [far, near] };
+                let merge = repo.commit_at(&parents, 1735689700);
+                repo.git(&["tag", "1.0.0+near", &near.to_string()]);
+                repo.git(&["tag", "1.0.0+far", &far.to_string()]);
+                repo.git(&["update-ref", "refs/heads/main", &merge.to_string()]);
+                assert_version(&repo.resolve(), "1.0.1-0.2.main");
+            }
+        }
     }
 
     #[test]

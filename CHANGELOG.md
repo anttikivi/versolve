@@ -41,6 +41,9 @@ and this project adheres to
   verbose output to the standard error fails.
 - Stop rerunning the build script on every build in a Git checkout that has no
   `packed-refs` file.
+- Use the closest of the reachable tags with equal precedence, as documented,
+  instead of a tag chosen by the order of the commit times when the tags are on
+  different branches.
 - Report that the current branch has no commits instead of the whole repository,
   as the repository may have commits on other branches, for example after
   `git checkout --orphan`.
