@@ -59,7 +59,17 @@ pub fn from_git(opts: &Options) -> Result<Version, Box<dyn std::error::Error>> {
 }
 
 fn resolve_from_git(opts: &Options) -> Result<Version, Box<dyn std::error::Error>> {
-    let repo = Repository::discover(&opts.repository)?;
+    let repo = match Repository::discover(&opts.repository) {
+        Err(e) if e.message().contains("extensions.refstorage") => {
+            verbose!(opts.verbose, "libgit2 error: {e}");
+            return Err(
+                "repository stores its references in the reftable format, which is not supported, \
+                convert them to the files format with \"git refs migrate --ref-format=files\""
+                    .into(),
+            );
+        }
+        repo => repo?,
+    };
 
     verbose!(opts.verbose, "opened repository at {:?}", repo.path());
 
@@ -993,6 +1003,19 @@ mod tests {
         assert_eq!(
             version.build.as_str(),
             format!("g{}.dirty", repo.short_head_id())
+        );
+    }
+
+    #[test]
+    fn reftable_repository_is_rejected() {
+        let repo = TestRepo::init(&["--ref-format=reftable"]);
+
+        repo.commit("commit");
+        let err = from_git(&repo.options()).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("git refs migrate --ref-format=files"),
+            "unexpected error: {err}"
         );
     }
 

@@ -26,6 +26,9 @@ and this project adheres to
   version much faster in repositories with long histories.
 - Explain how to fix a version tag that points to an object missing from the
   repository instead of only reporting that the tag cannot be peeled.
+- Explain that repositories that store their references in the reftable format
+  are not supported and how to convert them instead of only reporting that the
+  repository uses an unsupported extension.
 - Show the help message when `-h` or `--help` is given even if the other
   command-line arguments are invalid.
 - Suggest `--help` when the command-line arguments are invalid.
