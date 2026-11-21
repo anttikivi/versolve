@@ -5,7 +5,7 @@
 macro_rules! verbose {
     ($enabled:expr, $($args:tt)*) => {
         if $enabled {
-            eprintln!($($args)*);
+            crate::eprint_line(format_args!($($args)*));
         }
     };
 }
@@ -33,8 +33,8 @@ fn main() -> ExitCode {
             ..Default::default()
         },
         Err(s) => {
-            eprintln!("failed to parse command-line arguments: {s}");
-            eprintln!("run \"versolve --help\" to see the usage");
+            eprint_line(format_args!("failed to parse command-line arguments: {s}"));
+            eprint_line("run \"versolve --help\" to see the usage");
             return ExitCode::from(2);
         }
     };
@@ -42,7 +42,7 @@ fn main() -> ExitCode {
     match run(args) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("{e}");
+            eprint_line(e);
             ExitCode::FAILURE
         }
     }
@@ -86,4 +86,11 @@ fn run(args: args::Args) -> Result<(), Box<dyn std::error::Error>> {
 fn print_line(line: impl fmt::Display) -> Result<(), String> {
     writeln!(io::stdout().lock(), "{line}")
         .map_err(|e| format!("failed to write to standard output: {e}"))
+}
+
+/// Writes a line to the standard error. Ignores write errors instead of
+/// panicking as the diagnostics are best effort and failing to write them
+/// should not change the exit status.
+fn eprint_line(line: impl fmt::Display) {
+    let _ = writeln!(io::stderr().lock(), "{line}");
 }

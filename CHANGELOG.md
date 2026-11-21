@@ -37,6 +37,8 @@ and this project adheres to
 - Exit with status 1 and an error message instead of panicking when writing to
   the standard output fails, for example when the output is piped to a command
   that has already exited.
+- Keep the exit status instead of panicking when writing error messages or
+  verbose output to the standard error fails.
 - Report that the current branch has no commits instead of the whole repository,
   as the repository may have commits on other branches, for example after
   `git checkout --orphan`.

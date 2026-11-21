@@ -36,6 +36,29 @@ fn closed_stdout_is_an_error() {
 }
 
 #[test]
+fn closed_stderr_keeps_exit_status() {
+    let dir = TempDir::new().unwrap();
+    let missing = dir.path().join("missing");
+    let missing = missing.to_str().unwrap();
+
+    for (args, code, stdout) in [
+        (&["--bogus"][..], 2, ""),
+        (&["--verbose", "--version"], 0, "versolve "),
+        (&["-C", missing], 1, ""),
+    ] {
+        let (reader, writer) = io::pipe().unwrap();
+        drop(reader);
+        let output = Command::new(env!("CARGO_BIN_EXE_versolve"))
+            .args(args)
+            .stderr(writer)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(code), "{args:?}");
+        assert!(output.stdout.starts_with(stdout.as_bytes()), "{args:?}");
+    }
+}
+
+#[test]
 fn help_is_shown_despite_invalid_arguments() {
     for args in [&["--nope", "--help"][..], &["-h", "--nope"], &["-h", "-h"]] {
         let output = versolve(args);
