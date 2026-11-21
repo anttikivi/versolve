@@ -49,8 +49,6 @@ impl TryFrom<Args> for Options {
 
 pub fn from_git(opts: &Options) -> Result<Version, Box<dyn std::error::Error>> {
     resolve_from_git(opts).map_err(|e| match e.downcast::<git2::Error>() {
-        // The libgit2 errors include their class and code, which only help
-        // with debugging, so show them only in the verbose output.
         Ok(e) => {
             verbose!(opts.verbose, "libgit2 error: {e}");
             e.message().into()
@@ -70,9 +68,6 @@ fn resolve_from_git(opts: &Options) -> Result<Version, Box<dyn std::error::Error
 
     verbose!(opts.verbose, "opened repository at {:?}", repo.path());
 
-    // libgit2 looks for the "shallow" file only in the directory of the current
-    // worktree, but Git keeps it in the common directory, so check it there too
-    // for linked worktrees.
     let shallow_in_commondir =
         || std::fs::metadata(repo.commondir().join("shallow")).is_ok_and(|m| m.len() > 0);
     if repo.is_shallow() || shallow_in_commondir() {
@@ -108,8 +103,6 @@ fn resolve_from_git(opts: &Options) -> Result<Version, Box<dyn std::error::Error
     let head_commit = head_ref.peel(ObjectType::Commit)?;
     let head_oid = head_commit.id();
 
-    // A tag on the current commit is always used as is, even if a reachable tag
-    // has a higher version. The base tags all have the same precedence.
     let (mut base, mut base_oids) = match tags.remove(&head_oid) {
         Some(v) => (Some(v), vec![head_oid]),
         None => (None, Vec::new()),
@@ -119,10 +112,6 @@ fn resolve_from_git(opts: &Options) -> Result<Version, Box<dyn std::error::Error
         walk.push(head_oid)?;
 
         for oid in walk {
-            // Stop once every tag that could still replace the base has been
-            // found. Such tags that are not reachable from the current commit
-            // are never found, so with them the walk still visits the whole
-            // history.
             if tags.is_empty() {
                 break;
             }
@@ -132,8 +121,6 @@ fn resolve_from_git(opts: &Options) -> Result<Version, Box<dyn std::error::Error
             };
             match base.as_ref().map(|b| v.cmp_precedence(b)) {
                 None | Some(Ordering::Greater) => {
-                    // The base only gets higher, so tags with a lower version
-                    // can never replace it.
                     tags.retain(|_, t| t.cmp_precedence(&v) != Ordering::Less);
                     base = Some(v);
                     base_oids = vec![oid];
@@ -152,11 +139,6 @@ fn resolve_from_git(opts: &Options) -> Result<Version, Box<dyn std::error::Error
         }
         walk.try_fold(0, |n, id| id.map(|_| n + 1))
     };
-    // Tags with equal precedence give the same version apart from the distance,
-    // so use the one farthest from the current commit. The distance from each
-    // tag only grows from a commit to its children, and a merge can only add
-    // tags, so the farthest distance never decreases. The closest one would
-    // decrease when a merge brings in a closer tag.
     let distance = match base_oids.as_slice() {
         [] => distance_from(None)?,
         oids => oids
@@ -183,9 +165,6 @@ fn resolve_from_git(opts: &Options) -> Result<Version, Box<dyn std::error::Error
         };
         let branch = match opts.branch.as_deref() {
             Some(s) => Cow::Borrowed(s),
-            // Git allows branch names that are not valid UTF-8. The invalid
-            // sequences become U+FFFD, which is then replaced like the other
-            // characters not allowed in the version.
             None if head_ref.is_branch() => String::from_utf8_lossy(head_ref.shorthand_bytes()),
             None => {
                 return Err(format!(
@@ -249,8 +228,6 @@ fn ref_storage_error(opts: &Options) -> String {
     let value = Repository::discover_path(&opts.repository, None::<&str>)
         .ok()
         .and_then(|git_dir| {
-            // A linked worktree shares the configuration of the common
-            // directory, which its "commondir" file points to.
             let common_dir = match fs::read_to_string(git_dir.join("commondir")) {
                 Ok(s) => git_dir.join(s.trim_end_matches(['\n', '\r'])),
                 Err(_) => git_dir,
@@ -317,6 +294,7 @@ fn collect_tags(
             }
         };
         let target = reference.peel(ObjectType::Any).map_err(|e| {
+            verbose!(verbose, "libgit2 error: {e}");
             if e.code() == ErrorCode::NotFound {
                 format!(
                     "tag \"{tag}\" points to an object that is missing from the repository, fetch \
@@ -819,8 +797,6 @@ mod tests {
         let repo = TestRepo::new();
 
         repo.commit("commit");
-        // Use a packed reference, as some file systems reject file names that
-        // are not valid UTF-8.
         let head = Repository::open(repo.path())
             .unwrap()
             .head()
@@ -1033,7 +1009,6 @@ mod tests {
     fn higher_tag_found_after_lower_tag() {
         let repo = TestRepo::new();
 
-        // The merge is walked to the lower tag first, as it is the first parent and newer.
         let root = repo.commit_at(&[], 1735689600);
         let higher = repo.commit_at(&[root], 1735689610);
         let lower = repo.commit_at(&[root], 1735689620);
@@ -1048,8 +1023,6 @@ mod tests {
     fn equal_tag_on_descendant_found_after_ancestor() {
         let repo = TestRepo::new();
 
-        // The descendant has an older commit time than its parent, so the merge
-        // is walked to the ancestor first.
         let ancestor = repo.commit_at(&[], 1735689620);
         let descendant = repo.commit_at(&[ancestor], 1735689610);
         let merge = repo.commit_at(&[ancestor, descendant], 1735689630);
@@ -1061,9 +1034,6 @@ mod tests {
 
     #[test]
     fn farthest_equal_tag_on_parallel_branch() {
-        // The tag on the shorter branch is farther from the merge, as more
-        // commits are reachable only from the merge. Which tag is walked to
-        // first depends on the commit times and the order of the parents.
         for (near_time, far_time) in [(1735689610, 1735689650), (1735689650, 1735689610)] {
             for near_first in [true, false] {
                 let repo = TestRepo::new();
@@ -1088,8 +1058,6 @@ mod tests {
     fn merging_equal_tag_does_not_lower_version() {
         let repo = TestRepo::new();
 
-        // The second tag branches off later, so it is closer to the merge that
-        // brings it in than the first tag.
         repo.commit("commit");
         repo.git(&["checkout", "-b", "a"]);
         repo.commit("commit");

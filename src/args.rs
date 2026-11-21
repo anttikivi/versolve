@@ -116,8 +116,6 @@ where
                     b'v' => set_args_value(&mut args.verbose, "-v", true)?,
                     b'b' | b'B' | b'C' | b'T' => {
                         let c = char::from(c);
-                        // The option is at index i + 1 of the argument because
-                        // of the "-".
                         let (_, rest) = split_at_ascii(&arg, i + 1);
                         let val = if rest.is_empty() {
                             it.next()
