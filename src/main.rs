@@ -21,6 +21,8 @@ use std::{
     process::ExitCode,
 };
 
+use semver::{BuildMetadata, Version};
+
 fn main() -> ExitCode {
     let argv: Vec<OsString> = env::args_os().skip(1).collect();
     let args = match args::parse_args(argv.clone()) {
@@ -49,11 +51,15 @@ fn main() -> ExitCode {
 }
 
 fn run(args: args::Args) -> Result<(), Box<dyn std::error::Error>> {
-    verbose!(
-        args.verbose.unwrap_or(false),
-        "running versolve {}",
-        env!("VERSOLVE_VERSION")
-    );
+    let version = Version::parse(env!("VERSOLVE_VERSION")).unwrap_or_else(|e| {
+        panic!("failed to parse the embedded Versolve version, Versolve must be built with a valid version: {e}")
+    });
+    let stripped_version = Version {
+        build: BuildMetadata::EMPTY,
+        ..version.clone()
+    };
+
+    verbose!(args.verbose.unwrap_or(false), "running versolve {version}");
     verbose!(
         args.verbose.unwrap_or(false),
         "command-line arguments parsed: {args:?}"
@@ -65,7 +71,11 @@ fn run(args: args::Args) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if args.version.unwrap_or(false) {
-        print_line(format_args!("versolve {}", env!("VERSOLVE_VERSION")))?;
+        if args.verbose.unwrap_or(false) {
+            print_line(format_args!("versolve {version}"))?;
+        } else {
+            print_line(format_args!("versolve {stripped_version}"))?;
+        }
         return Ok(());
     }
 

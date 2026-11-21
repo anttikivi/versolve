@@ -8,6 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Changed
+
+- Print the build metadata with `--version` only when verbose output is enabled.
+
 ## [0.2.0] - 2026-11-21
 
 ### Added
