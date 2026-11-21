@@ -369,12 +369,30 @@ fn collect_tags(
 
 #[cfg(test)]
 mod tests {
-    use std::{cmp::Ordering, fs, path::Path, process::Command};
+    use std::{cmp::Ordering, fs, path::Path, process::Command, sync::Once};
 
-    use git2::{Commit, Signature, Time};
+    use git2::{Commit, ConfigLevel, Signature, Time};
     use tempfile::TempDir;
 
     use super::*;
+
+    fn isolate_libgit2_config() {
+        static ISOLATE: Once = Once::new();
+        ISOLATE.call_once(|| {
+            for level in [
+                ConfigLevel::System,
+                ConfigLevel::Global,
+                ConfigLevel::XDG,
+                ConfigLevel::ProgramData,
+            ] {
+                // SAFETY: Every test creates a `TestRepo` before it uses
+                // libgit2, and `Once` blocks the other tests until the search
+                // paths are set, so nothing reads them concurrently.
+                unsafe { git2::opts::set_search_path(level, "") }
+                    .expect("failed to clear the libgit2 search path");
+            }
+        });
+    }
 
     struct TestRepo {
         dir: TempDir,
@@ -386,6 +404,7 @@ mod tests {
         }
 
         fn init(args: &[&str]) -> Self {
+            isolate_libgit2_config();
             let repo = Self {
                 dir: TempDir::new().expect("failed to create temporary directory"),
             };
