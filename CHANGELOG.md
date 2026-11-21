@@ -14,58 +14,44 @@ and this project adheres to
 
 ### Changed
 
-- Always build libgit2 from the sources bundled with the `libgit2-sys` crate
-  instead of linking to a compatible version of the system library when one is
-  found, so that the installed binary does not break when the system library is
-  updated.
-- Check for uncommitted changes without listing every file in untracked
-  directories, which makes the check faster when the working tree has large
+- When several reachable tags have equal precedence, Versolve now uses the one
+  farthest from the current commit, so merging a branch with such a tag can't
+  lower the version anymore. Version 0.1.0 documented the closest tag but
+  actually picked one by commit time, so the development versions of some
+  commits may change.
+- Resolving the version is much faster in long histories, as Versolve no longer
+  walks back to the oldest version tag.
+- Checking for uncommitted changes is faster when the working tree has large
   untracked directories.
-- Stop searching for the latest version tag once no tag with a higher version is
-  left instead of searching for every version tag, which makes resolving the
-  version much faster in repositories with long histories.
-- Explain how to fix a version tag that points to an object missing from the
-  repository instead of only reporting that the tag cannot be peeled.
-- Explain that repositories that store their references in the reftable format
-  are not supported and how to convert them, or how to remove an explicit
-  `extensions.refStorage` setting for the files format, instead of only
-  reporting that the repository uses an unsupported extension.
-- Show the help message when `-h` or `--help` is given even if the other
-  command-line arguments are invalid.
-- Suggest `--help` when the command-line arguments are invalid.
-- Explain that a split index is not supported and how to turn it off instead of
-  only reporting an unsupported index extension.
-- Leave the error class and code of libgit2 errors out of the error messages and
-  show them only in the verbose output.
-- Use the farthest of the reachable tags with equal precedence instead of the
-  closest one, so that merging a branch with a tag of equal precedence cannot
-  lower the version.
+- libgit2 is always built from the sources bundled with `libgit2-sys`, so
+  updating the system library can't break an installed binary anymore.
+- Error messages explain how to fix a version tag that points to a missing
+  object, a repository that uses reftable or sets `extensions.refStorage`, and a
+  split index.
+- libgit2 errors show only the message. The full error is in the verbose output.
+- `-h` and `--help` show the help even if other arguments are invalid, and
+  invalid arguments suggest `--help`.
 
 ### Fixed
 
-- Exit with status 1 and an error message instead of panicking when writing to
-  the standard output fails, for example when the output is piped to a command
-  that has already exited.
-- Keep the exit status instead of panicking when writing error messages or
-  verbose output to the standard error fails.
-- Stop rerunning the build script on every build in a Git checkout that has no
-  `packed-refs` file.
-- Warn when the build cannot open the Git repository it is built from instead of
-  silently embedding the version from `Cargo.toml`.
-- Update the version embedded in the build when the Git configuration changes,
-  as `core.abbrev` sets the length of the abbreviated commit ID.
-- Refuse to run in a linked worktree of a shallow clone, as in the main working
-  tree, instead of failing with a missing object or resolving a wrong version.
-- Replace the parts of a branch name that are not valid UTF-8 with `-` instead
-  of failing to resolve the version.
-- Report that the current branch has no commits instead of the whole repository,
-  as the repository may have commits on other branches, for example after
-  `git checkout --orphan`.
-- Accept a repository path that is not valid UTF-8 when it is attached to the
-  option, as in `-C<path>` and `--repository=<path>`, and not only when it is
-  given as a separate argument.
-- Print the canonical flag name `--verbose` instead of `--no-verbose` when
-  duplicate setting is detected while parsing `--no-verbose`.
+- Versolve no longer panics when writing to the standard output or standard
+  error fails, for example when piped to a command that has already exited, and
+  exits with the documented status instead.
+- Shallow clones are now detected in linked worktrees too, instead of failing
+  with a missing object or resolving a wrong version.
+- Branch names that aren't valid UTF-8 no longer fail. The invalid bytes are
+  replaced with `-`.
+- Repository paths that aren't valid UTF-8 now also work as `-C<path>` and
+  `--repository=<path>`, not only as a separate argument.
+- A branch with no commits, for example after `git checkout --orphan`, is no
+  longer reported as an empty repository.
+- The GitHub Actions example in the README now checks out the pull request's own
+  commit instead of GitHub's merge commit.
+- When building from source, the build script:
+  - no longer reruns on every build in a checkout without `packed-refs`
+  - picks up Git configuration changes such as `core.abbrev`
+  - warns when it can't open the repository instead of silently using the
+    version in `Cargo.toml`.
 
 ## [0.1.0] - 2026-11-20
 
