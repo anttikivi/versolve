@@ -3,13 +3,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use std::{
+    borrow::Cow,
     cmp::Ordering,
     collections::{HashMap, hash_map::Entry},
-    env, io,
+    env, fs, io,
     path::PathBuf,
 };
 
-use git2::{ErrorCode, ObjectType, Oid, Repository, StatusOptions};
+use git2::{Config, ErrorCode, ObjectType, Oid, Repository, StatusOptions};
 use semver::{BuildMetadata, Prerelease, Version};
 
 use crate::args::Args;
@@ -62,18 +63,19 @@ fn resolve_from_git(opts: &Options) -> Result<Version, Box<dyn std::error::Error
     let repo = match Repository::discover(&opts.repository) {
         Err(e) if e.message().contains("extensions.refstorage") => {
             verbose!(opts.verbose, "libgit2 error: {e}");
-            return Err(
-                "repository stores its references in the reftable format, which is not supported, \
-                convert them to the files format with \"git refs migrate --ref-format=files\""
-                    .into(),
-            );
+            return Err(ref_storage_error(opts).into());
         }
         repo => repo?,
     };
 
     verbose!(opts.verbose, "opened repository at {:?}", repo.path());
 
-    if repo.is_shallow() {
+    // libgit2 looks for the "shallow" file only in the directory of the current
+    // worktree, but Git keeps it in the common directory, so check it there too
+    // for linked worktrees.
+    let shallow_in_commondir =
+        || std::fs::metadata(repo.commondir().join("shallow")).is_ok_and(|m| m.len() > 0);
+    if repo.is_shallow() || shallow_in_commondir() {
         return Err(
             "repository is a shallow clone and its history may be incomplete, fetch the full \
             history with \"git fetch --unshallow --tags\""
@@ -151,12 +153,15 @@ fn resolve_from_git(opts: &Options) -> Result<Version, Box<dyn std::error::Error
         walk.try_fold(0, |n, id| id.map(|_| n + 1))
     };
     // Tags with equal precedence give the same version apart from the distance,
-    // so use the one closest to the current commit.
+    // so use the one farthest from the current commit. The distance from each
+    // tag only grows from a commit to its children, and a merge can only add
+    // tags, so the farthest distance never decreases. The closest one would
+    // decrease when a merge brings in a closer tag.
     let distance = match base_oids.as_slice() {
         [] => distance_from(None)?,
-        oids => oids.iter().try_fold(usize::MAX, |d, &oid| {
-            distance_from(Some(oid)).map(|n| d.min(n))
-        })?,
+        oids => oids
+            .iter()
+            .try_fold(0, |d, &oid| distance_from(Some(oid)).map(|n| d.max(n)))?,
     };
 
     let mut version = match base {
@@ -177,8 +182,11 @@ fn resolve_from_git(opts: &Options) -> Result<Version, Box<dyn std::error::Error
             p => format!("{p}.0.{distance}"),
         };
         let branch = match opts.branch.as_deref() {
-            Some(s) => s,
-            None if head_ref.is_branch() => head_ref.shorthand()?,
+            Some(s) => Cow::Borrowed(s),
+            // Git allows branch names that are not valid UTF-8. The invalid
+            // sequences become U+FFFD, which is then replaced like the other
+            // characters not allowed in the version.
+            None if head_ref.is_branch() => String::from_utf8_lossy(head_ref.shorthand_bytes()),
             None => {
                 return Err(format!(
                     "HEAD is detached at {head_oid}; pass \"--branch\" to name the branch"
@@ -186,7 +194,7 @@ fn resolve_from_git(opts: &Options) -> Result<Version, Box<dyn std::error::Error
                 .into());
             }
         };
-        if opts.default_branch.as_deref() != Some(branch) {
+        if opts.default_branch.as_deref() != Some(&*branch) {
             pre.push('.');
             if branch.bytes().all(|b| b.is_ascii_digit()) {
                 pre.push('b');
@@ -204,8 +212,21 @@ fn resolve_from_git(opts: &Options) -> Result<Version, Box<dyn std::error::Error
 
     let mut status_opts = StatusOptions::new();
     let status_opts = status_opts.include_untracked(true);
-    let dirty =
-        opts.check_dirty && !repo.is_bare() && !repo.statuses(Some(status_opts))?.is_empty();
+    let dirty = opts.check_dirty && !repo.is_bare() && {
+        let statuses =
+            repo.statuses(Some(status_opts))
+                .map_err(|e| -> Box<dyn std::error::Error> {
+                    if e.class() == git2::ErrorClass::Index && e.message().contains("'link'") {
+                        verbose!(opts.verbose, "libgit2 error: {e}");
+                        "repository uses a split index, which is not supported, turn it off with \
+                        \"git update-index --no-split-index\""
+                            .into()
+                    } else {
+                        e.into()
+                    }
+                })?;
+        !statuses.is_empty()
+    };
 
     let short_id = head_commit.short_id()?;
     let short_id = short_id.as_str()?;
@@ -219,6 +240,46 @@ fn resolve_from_git(opts: &Options) -> Result<Version, Box<dyn std::error::Error
     version.build = BuildMetadata::new(&build)?;
 
     Ok(version)
+}
+
+/// Explains why the repository with the unsupported `extensions.refStorage`
+/// setting cannot be opened. libgit2 rejects the setting regardless of its
+/// value, so read the value from the configuration to give the right advice.
+fn ref_storage_error(opts: &Options) -> String {
+    let value = Repository::discover_path(&opts.repository, None::<&str>)
+        .ok()
+        .and_then(|git_dir| {
+            // A linked worktree shares the configuration of the common
+            // directory, which its "commondir" file points to.
+            let common_dir = match fs::read_to_string(git_dir.join("commondir")) {
+                Ok(s) => git_dir.join(s.trim_end_matches(['\n', '\r'])),
+                Err(_) => git_dir,
+            };
+            Config::open(&common_dir.join("config"))
+                .and_then(|c| c.get_string("extensions.refStorage"))
+                .ok()
+        });
+    verbose!(opts.verbose, "extensions.refStorage is {value:?}");
+
+    match value.as_deref() {
+        Some("reftable") => {
+            "repository stores its references in the reftable format, which is not supported, \
+            convert them to the files format with \"git refs migrate --ref-format=files\""
+                .into()
+        }
+        Some("files") => "repository sets \"extensions.refStorage\", which is not supported even \
+            with the value \"files\", remove the setting with \
+            \"git config --unset extensions.refStorage\""
+            .into(),
+        Some(v) => format!(
+            "repository stores its references in the unsupported format {v:?}, convert them to the \
+            files format with \"git refs migrate --ref-format=files\""
+        ),
+        None => "repository sets \"extensions.refStorage\", which is not supported, convert its \
+            references to the files format with \"git refs migrate --ref-format=files\" and remove \
+            the setting"
+            .into(),
+    }
 }
 
 fn collect_tags(
@@ -537,13 +598,13 @@ mod tests {
         let repo = TestRepo::new();
 
         repo.commit("commit");
-        repo.tag("1.0.0+z");
-        repo.commit("commit");
         repo.tag("1.0.0+a");
+        repo.commit("commit");
+        repo.tag("1.0.0+z");
         assert_version(&repo.resolve(), "1.0.0");
 
         repo.commit("commit");
-        assert_version(&repo.resolve(), "1.0.1-0.1.main");
+        assert_version(&repo.resolve(), "1.0.1-0.2.main");
     }
 
     #[test]
@@ -735,6 +796,29 @@ mod tests {
     }
 
     #[test]
+    fn non_utf8_branch_name() {
+        let repo = TestRepo::new();
+
+        repo.commit("commit");
+        // Use a packed reference, as some file systems reject file names that
+        // are not valid UTF-8.
+        let head = Repository::open(repo.path())
+            .unwrap()
+            .head()
+            .unwrap()
+            .target()
+            .unwrap();
+        let git_dir = repo.path().join(".git");
+        let mut packed = b"# pack-refs with: peeled fully-peeled sorted \n".to_vec();
+        packed.extend_from_slice(format!("{head} refs/heads/caf").as_bytes());
+        packed.extend_from_slice(b"\xe9\n");
+        fs::write(git_dir.join("packed-refs"), packed).unwrap();
+        fs::write(git_dir.join("HEAD"), b"ref: refs/heads/caf\xe9\n").unwrap();
+
+        assert_version(&repo.resolve(), "0.1.0-0.1.caf-");
+    }
+
+    #[test]
     fn default_and_manual_branch() {
         let repo = TestRepo::new();
         let opts = Options {
@@ -760,15 +844,28 @@ mod tests {
         let repo_path = repo.path().to_str().unwrap();
         repo.git(&["clone", "--no-local", "--depth=1", repo_path, clone_path]);
 
-        let opts = Options {
-            repository: clone.path().to_path_buf(),
-            ..repo.options()
-        };
-        let err = from_git(&opts).unwrap_err();
-        assert!(
-            err.to_string().contains("shallow"),
-            "unexpected error: {err}"
-        );
+        let worktree = TempDir::new().unwrap();
+        let worktree_path = worktree.path().join("worktree");
+        repo.git(&[
+            "-C",
+            clone_path,
+            "worktree",
+            "add",
+            "--detach",
+            worktree_path.to_str().unwrap(),
+        ]);
+
+        for path in [clone.path(), &worktree_path] {
+            let opts = Options {
+                repository: path.to_path_buf(),
+                ..repo.options()
+            };
+            let err = from_git(&opts).unwrap_err();
+            assert!(
+                err.to_string().contains("git fetch --unshallow --tags"),
+                "unexpected error for {path:?}: {err}"
+            );
+        }
     }
 
     #[test]
@@ -940,14 +1037,14 @@ mod tests {
         repo.git(&["tag", "1.0.0+a", &ancestor.to_string()]);
         repo.git(&["tag", "1.0.0+b", &descendant.to_string()]);
         repo.git(&["update-ref", "refs/heads/main", &merge.to_string()]);
-        assert_version(&repo.resolve(), "1.0.1-0.1.main");
+        assert_version(&repo.resolve(), "1.0.1-0.2.main");
     }
 
     #[test]
-    fn closest_equal_tag_on_parallel_branch() {
-        // The tag on the longer branch is closer to the merge, as fewer commits
-        // are reachable only from the merge. Which tag is walked to first
-        // depends on the commit times and the order of the parents.
+    fn farthest_equal_tag_on_parallel_branch() {
+        // The tag on the shorter branch is farther from the merge, as more
+        // commits are reachable only from the merge. Which tag is walked to
+        // first depends on the commit times and the order of the parents.
         for (near_time, far_time) in [(1735689610, 1735689650), (1735689650, 1735689610)] {
             for near_first in [true, false] {
                 let repo = TestRepo::new();
@@ -963,9 +1060,37 @@ mod tests {
                 repo.git(&["tag", "1.0.0+near", &near.to_string()]);
                 repo.git(&["tag", "1.0.0+far", &far.to_string()]);
                 repo.git(&["update-ref", "refs/heads/main", &merge.to_string()]);
-                assert_version(&repo.resolve(), "1.0.1-0.2.main");
+                assert_version(&repo.resolve(), "1.0.1-0.4.main");
             }
         }
+    }
+
+    #[test]
+    fn merging_equal_tag_does_not_lower_version() {
+        let repo = TestRepo::new();
+
+        // The second tag branches off later, so it is closer to the merge that
+        // brings it in than the first tag.
+        repo.commit("commit");
+        repo.git(&["checkout", "-b", "a"]);
+        repo.commit("commit");
+        repo.tag("1.0.0+a");
+
+        repo.git(&["checkout", "main"]);
+        repo.commit_many(8);
+        repo.git(&["checkout", "-b", "b"]);
+        repo.commit("commit");
+        repo.tag("1.0.0+b");
+
+        repo.git(&["checkout", "main"]);
+        repo.git(&["merge", "--no-ff", "-m", "merge a", "a"]);
+        let first = repo.resolve();
+        assert_version(&first, "1.0.1-0.9.main");
+
+        repo.git(&["merge", "--no-ff", "-m", "merge b", "b"]);
+        let second = repo.resolve();
+        assert_version(&second, "1.0.1-0.11.main");
+        assert_eq!(second.cmp_precedence(&first), Ordering::Greater);
     }
 
     #[test]
@@ -1013,10 +1138,49 @@ mod tests {
         repo.commit("commit");
         let err = from_git(&repo.options()).unwrap_err();
         assert!(
-            err.to_string()
-                .contains("git refs migrate --ref-format=files"),
+            err.to_string().contains("reftable format")
+                && err
+                    .to_string()
+                    .contains("git refs migrate --ref-format=files"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn split_index_is_rejected() {
+        let repo = TestRepo::new();
+
+        repo.write_file("file.txt", "contents\n");
+        repo.commit_all("commit");
+        repo.git(&["update-index", "--split-index"]);
+        let err = from_git(&repo.options()).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("git update-index --no-split-index"),
+            "unexpected error: {err}"
+        );
+
+        repo.git(&["update-index", "--no-split-index"]);
+        assert_version(&repo.resolve(), "0.1.0-0.1.main");
+    }
+
+    #[test]
+    fn explicit_files_ref_storage_is_rejected() {
+        let repo = TestRepo::new();
+
+        repo.commit("commit");
+        repo.git(&["config", "core.repositoryFormatVersion", "1"]);
+        repo.git(&["config", "extensions.refStorage", "files"]);
+        let err = from_git(&repo.options()).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("git config --unset extensions.refStorage")
+                && !err.to_string().contains("reftable"),
+            "unexpected error: {err}"
+        );
+
+        repo.git(&["config", "--unset", "extensions.refStorage"]);
+        assert_version(&repo.resolve(), "0.1.0-0.1.main");
     }
 
     #[test]

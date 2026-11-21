@@ -50,7 +50,8 @@ and 2 if the command-line arguments are invalid.
 If the current commit has a version tag, Versolve uses it. Otherwise it finds
 the highest version tag that is reachable from the current commit. Build
 metadata does not affect which tag is the highest, and of tags with equal
-precedence the one closest to the current commit is used. A tag is a version tag
+precedence the one farthest from the current commit is used, so that merging a
+branch with such a tag cannot lower the version. A tag is a version tag
 if its name, after removing the prefix given with `--tag-prefix`, is a valid
 semantic version number. All other tags are ignored. Note that this means tags
 like `v1.2.3` are only used if you pass `--tag-prefix v`.
@@ -105,7 +106,8 @@ The branch name keeps the versions of commits on different branches unique. Use
 `--default-branch` to leave it out on your main branch.
 
 Characters that are not allowed in a pre-release identifier, that is anything
-other than ASCII letters, digits, and `-`, are replaced with `-`, so
+other than ASCII letters, digits, and `-`, and bytes that are not valid UTF-8
+are replaced with `-`, so
 `feature/example` becomes `feature-example`. A branch name with only digits is
 prefixed with `b`. Because of this, different branch names can produce the same
 identifier, for example `feature/example` and `feature-example`.
@@ -131,6 +133,12 @@ ones created with `git init --ref-format=reftable`, are not supported, as
 libgit2 doesn't have support for them. To use Versolve in such a repository,
 convert its references to the files format with
 `git refs migrate --ref-format=files`, which requires Git 2.46 or later.
+libgit2 also rejects repositories that explicitly set `extensions.refStorage` to
+`files`. Remove the setting with `git config --unset extensions.refStorage`.
+
+A split index, enabled with `git update-index --split-index` or
+`core.splitIndex`, is not supported either. Turn it off with
+`git update-index --no-split-index`.
 
 ### GitHub Actions
 

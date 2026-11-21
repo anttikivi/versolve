@@ -27,13 +27,19 @@ and this project adheres to
 - Explain how to fix a version tag that points to an object missing from the
   repository instead of only reporting that the tag cannot be peeled.
 - Explain that repositories that store their references in the reftable format
-  are not supported and how to convert them instead of only reporting that the
-  repository uses an unsupported extension.
+  are not supported and how to convert them, or how to remove an explicit
+  `extensions.refStorage` setting for the files format, instead of only
+  reporting that the repository uses an unsupported extension.
 - Show the help message when `-h` or `--help` is given even if the other
   command-line arguments are invalid.
 - Suggest `--help` when the command-line arguments are invalid.
+- Explain that a split index is not supported and how to turn it off instead of
+  only reporting an unsupported index extension.
 - Leave the error class and code of libgit2 errors out of the error messages and
   show them only in the verbose output.
+- Use the farthest of the reachable tags with equal precedence instead of the
+  closest one, so that merging a branch with a tag of equal precedence cannot
+  lower the version.
 
 ### Fixed
 
@@ -46,9 +52,10 @@ and this project adheres to
   `packed-refs` file.
 - Update the version embedded in the build when the Git configuration changes,
   as `core.abbrev` sets the length of the abbreviated commit ID.
-- Use the closest of the reachable tags with equal precedence, as documented,
-  instead of a tag chosen by the order of the commit times when the tags are on
-  different branches.
+- Refuse to run in a linked worktree of a shallow clone, as in the main working
+  tree, instead of failing with a missing object or resolving a wrong version.
+- Replace the parts of a branch name that are not valid UTF-8 with `-` instead
+  of failing to resolve the version.
 - Report that the current branch has no commits instead of the whole repository,
   as the repository may have commits on other branches, for example after
   `git checkout --orphan`.
