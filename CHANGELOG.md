@@ -64,6 +64,8 @@ and this project adheres to
 - Accept a repository path that is not valid UTF-8 when it is attached to the
   option, as in `-C<path>` and `--repository=<path>`, and not only when it is
   given as a separate argument.
+- Print the canonical flag name `--verbose` instead of `--no-verbose` when
+  duplicate setting is detected while parsing `--no-verbose`.
 
 ## [0.1.0] - 2026-11-20
 

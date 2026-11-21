@@ -80,7 +80,7 @@ where
                 "--verbose" => set_args_value(&mut args.verbose, name, flag(name, &inline_val)?)?,
                 "--no-verbose" => {
                     no_value_flag(name, &inline_val)?;
-                    set_args_value(&mut args.verbose, name, false)?;
+                    set_args_value(&mut args.verbose, "--verbose", false)?;
                 }
                 "--branch" | "--default-branch" | "--repository" | "--tag-prefix" => {
                     let val = inline_val
