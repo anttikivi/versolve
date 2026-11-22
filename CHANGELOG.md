@@ -18,7 +18,8 @@ and this project adheres to
   from its build script. When the version is resolved from the repository, it
   also sets `<VAR>_COMMIT_HASH`, `<VAR>_COMMIT_SHORT_HASH`, and
   `<VAR>_COMMIT_DATE`, so that the package can print its version like
-  `rustc --version` does.
+  `rustc --version` does. The commit date is in UTC by default, and
+  `Config::time_zone` can set it to the committer's time zone instead.
 - `--verbose --version` prints the full version, commit hash, commit date, and
   host in the format of `rustc -vV`.
 - The `sha256` and `vendored-libgit2` features, both on by default, so that
@@ -32,8 +33,8 @@ and this project adheres to
   General Public License v3.0 or later.
 - `--version` prints the version in the format of `rustc --version`, for example
   `versolve 0.3.0 (1a2b3c4 2026-11-21)`. The build metadata is left out of the
-  version, and the abbreviated hash and the date of the commit follow it in
-  parentheses. The commit is omitted when Versolve is built from a packaged
+  version, and the abbreviated hash and the date of the commit in UTC follow it
+  in parentheses. The commit is omitted when Versolve is built from a packaged
   crate.
 - When building from source, the build script also finds the repository from the
   parent directories, but leaves out packaged crates and directories that the

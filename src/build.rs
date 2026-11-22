@@ -60,6 +60,20 @@ pub struct Config {
     default_branch: Option<String>,
     branch_env: Option<String>,
     strict: bool,
+    time_zone: TimeZone,
+}
+
+/// The time zone of the commit date that [`Config::emit`] sets.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum TimeZone {
+    /// Coordinated Universal Time, so that the date doesn't depend on who
+    /// made the commit.
+    #[default]
+    Utc,
+    /// The time zone recorded in the commit, which is what
+    /// `git log --date=short` shows.
+    Committer,
 }
 
 impl Config {
@@ -104,6 +118,12 @@ impl Config {
         self
     }
 
+    /// Sets the time zone of the commit date. By default, the date is in UTC.
+    pub fn time_zone(mut self, time_zone: TimeZone) -> Self {
+        self.time_zone = time_zone;
+        self
+    }
+
     /// Prints the Cargo instructions and sets `var` for the package.
     ///
     /// The package can read the version with `env!` using the name `var`. The
@@ -119,7 +139,7 @@ impl Config {
     /// - `<var>_COMMIT_SHORT_HASH`: the abbreviated hash of the commit, as in
     ///   the build metadata of the version; and
     /// - `<var>_COMMIT_DATE`: the committer date of the commit as `YYYY-MM-DD`,
-    ///   in the committer's time zone like `git log --date=short` shows it.
+    ///   in UTC unless [another time zone](Config::time_zone) is set.
     ///
     /// They are not set when the version from `Cargo.toml` is used.
     ///
@@ -245,7 +265,7 @@ impl Config {
         }
 
         let version = resolver.resolve_repository(&repo)?;
-        let commit = CommitInfo::new(&repo.head()?.peel_to_commit()?)?;
+        let commit = CommitInfo::new(&repo.head()?.peel_to_commit()?, self.time_zone)?;
         Ok(Some((version, commit)))
     }
 }
@@ -258,11 +278,15 @@ struct CommitInfo {
 }
 
 impl CommitInfo {
-    fn new(commit: &Commit<'_>) -> Result<Self, Error> {
+    fn new(commit: &Commit<'_>, time_zone: TimeZone) -> Result<Self, Error> {
         let short_hash = commit.as_object().short_id()?;
         let short_hash = short_hash.as_str()?;
         let time = commit.time();
-        let (year, month, day) = civil_date(time.seconds() + i64::from(time.offset_minutes()) * 60);
+        let offset = match time_zone {
+            TimeZone::Utc => 0,
+            TimeZone::Committer => i64::from(time.offset_minutes()) * 60,
+        };
+        let (year, month, day) = civil_date(time.seconds() + offset);
         Ok(Self {
             hash: commit.id().to_string(),
             short_hash: short_hash.to_owned(),
@@ -492,27 +516,34 @@ mod tests {
     #[test]
     fn commit_information() {
         // 2025-01-01T00:00:00Z with the committer's time zone offset in
-        // minutes.
-        for (offset, date) in [
-            (0, "2025-01-01"),
-            (-60, "2024-12-31"),
-            (14 * 60, "2025-01-01"),
+        // minutes, and the expected dates in UTC and in the committer's time
+        // zone.
+        for (offset, utc_date, committer_date) in [
+            (0, "2025-01-01", "2025-01-01"),
+            (-60, "2025-01-01", "2024-12-31"),
+            (14 * 60, "2025-01-01", "2025-01-01"),
         ] {
             let repo = TestRepo::new();
             commit_with_time(&repo, Time::new(1_735_689_600, offset));
             let short_id = repo.short_head_id();
 
-            let (result, output) = emit(&config(), repo.path(), &[]);
-            assert_eq!(result.unwrap().build.as_str(), format!("g{short_id}"));
-            assert!(
-                output.ends_with(&format!(
-                    "cargo:rustc-env={VAR}_COMMIT_HASH={}\n\
-                    cargo:rustc-env={VAR}_COMMIT_SHORT_HASH={short_id}\n\
-                    cargo:rustc-env={VAR}_COMMIT_DATE={date}\n",
-                    repo.head_id()
-                )),
-                "{offset}: {output}"
-            );
+            for (config, date) in [
+                (config(), utc_date),
+                (config().time_zone(TimeZone::Utc), utc_date),
+                (config().time_zone(TimeZone::Committer), committer_date),
+            ] {
+                let (result, output) = emit(&config, repo.path(), &[]);
+                assert_eq!(result.unwrap().build.as_str(), format!("g{short_id}"));
+                assert!(
+                    output.ends_with(&format!(
+                        "cargo:rustc-env={VAR}_COMMIT_HASH={}\n\
+                        cargo:rustc-env={VAR}_COMMIT_SHORT_HASH={short_id}\n\
+                        cargo:rustc-env={VAR}_COMMIT_DATE={date}\n",
+                        repo.head_id()
+                    )),
+                    "{offset}, {config:?}: {output}"
+                );
+            }
         }
     }
 
