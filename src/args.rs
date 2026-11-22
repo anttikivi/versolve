@@ -20,14 +20,14 @@ Usage: versolve [options]
 
 Options:
 
-    -b, --branch <name>         Manually override the current branch name
-    -B, --default-branch <name> Omit the branch name in version numbers for this branch
-    -h, --help                  Print this help message
-    -C, --repository <path>     Path to the Git repository to inspect
-    -T, --tag-prefix <prefix>   Consider only tags with this prefix
-    -v, --verbose               Print debug information
+    -b, --branch <name>         Use this branch name instead of the current branch
+    -B, --default-branch <name> Omit the branch name from versions on this branch
+    -C, --repository <path>     Resolve the version for this repository
+    -T, --tag-prefix <prefix>   Consider only tags with this prefix, for example v
+    -v, --verbose               Print debug information to standard error
     --no-verbose                Do not print debug information
-    -V, --version               Print Versolve's version";
+    -h, --help                  Print the help message
+    -V, --version               Print the version of Versolve";
 
 /// Reports whether `argv` asks for the help message with "-h" or "--help"
 /// before "--". Unlike `parse_args`, this works even if the other arguments are

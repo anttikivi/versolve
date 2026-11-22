@@ -25,8 +25,9 @@
 //! version like `rustc --version` does:
 //!
 //! ```
-//! # macro_rules! env { ($var:literal) => { "1.2.3" } }
-//! let version = env!("MYAPP_VERSION");
+//! # macro_rules! env { ($var:literal) => { "1.2.3+g1a2b3c4" } }
+//! // Leave out the build metadata, as the hash is printed separately.
+//! let version = env!("MYAPP_VERSION").split('+').next().unwrap();
 //! let commit = option_env!("MYAPP_VERSION_COMMIT_SHORT_HASH")
 //!     .zip(option_env!("MYAPP_VERSION_COMMIT_DATE"));
 //! match commit {
@@ -156,8 +157,9 @@ impl Config {
     /// the version from `Cargo.toml` is used and a warning is printed, unless
     /// [strict mode](Config::strict) is on.
     ///
-    /// The instructions use the `cargo:` syntax so that they work with packages
-    /// whose minimum supported Rust version is older than 1.77.
+    /// The instructions use the `cargo:` syntax, as Cargo rejects the newer
+    /// `cargo::` syntax in packages that set `rust-version` to a version older
+    /// than 1.77.
     ///
     /// # Errors
     ///

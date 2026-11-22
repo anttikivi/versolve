@@ -40,7 +40,7 @@ $ versolve --tag-prefix v --default-branch main
 | `-v`, `--verbose`               | Print debug information to standard error            |
 | `--no-verbose`                  | Do not print debug information                       |
 | `-h`, `--help`                  | Print the help message                               |
-| `--version`                     | Print the version of Versolve                        |
+| `-V`, `--version`               | Print the version of Versolve                        |
 
 Versolve exits with status 0 on success, 1 if the version cannot be resolved,
 and 2 if the command-line arguments are invalid.
@@ -188,6 +188,28 @@ program can read the version at compile time:
 ```rust
 const VERSION: &str = env!("MYAPP_VERSION");
 ```
+
+If the version is resolved from the repository, `emit` also sets
+`MYAPP_VERSION_COMMIT_HASH`, `MYAPP_VERSION_COMMIT_SHORT_HASH`, and
+`MYAPP_VERSION_COMMIT_DATE` to the full hash, the abbreviated hash, and the date
+of the commit. They are not set when the version from `Cargo.toml` is used, so
+read them with `option_env!`. For example, to print the version like
+`rustc --version` does:
+
+```rust
+// Leave out the build metadata, as the hash is printed separately.
+let version = env!("MYAPP_VERSION").split('+').next().unwrap();
+let commit = option_env!("MYAPP_VERSION_COMMIT_SHORT_HASH")
+    .zip(option_env!("MYAPP_VERSION_COMMIT_DATE"));
+match commit {
+    Some((hash, date)) => println!("myapp {version} ({hash} {date})"),
+    None => println!("myapp {version}"),
+}
+```
+
+The date is the committer date in UTC as `YYYY-MM-DD`. To use the time zone
+recorded in the commit instead, as `git log --date=short` does, call
+`.time_zone(versolve::build::TimeZone::Committer)`.
 
 The version is resolved from the committed state of the repository that contains
 the package, so it never has `.dirty` in it: a build script can't track every

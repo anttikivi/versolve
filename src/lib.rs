@@ -39,6 +39,23 @@
 //!
 //! The program can then read the version with `env!("MYAPP_VERSION")`.
 //!
+//! # Requirements and features
+//!
+//! Versolve requires Rust 1.88 or later and a C compiler, as it builds libgit2
+//! from the bundled sources by default. It has two features, both on by
+//! default:
+//!
+//! - `vendored-libgit2`: always build libgit2 from the bundled sources instead
+//!   of using a compatible libgit2 installed on the system.
+//! - `sha256`: support repositories that use SHA-256 object IDs. This builds
+//!   libgit2 with its experimental SHA-256 support.
+//!
+//! Cargo combines the features of a dependency across all packages, so these
+//! features also apply to every other package in the build that uses `git2`.
+//! See the
+//! [README](https://github.com/anttikivi/versolve#requirements-and-features)
+//! for the details.
+//!
 //! # Logging
 //!
 //! Versolve logs debug messages about how it resolves the version, such as
