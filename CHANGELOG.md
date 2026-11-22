@@ -25,6 +25,7 @@ and this project adheres to
 - The `sha256` and `vendored-libgit2` features, both on by default, so that
   SHA-256 support and the bundled libgit2 can be left out. With the default
   features, libgit2 is still always built from the bundled sources.
+- Short option `-V` for printing the version.
 
 ### Changed
 

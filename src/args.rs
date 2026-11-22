@@ -27,7 +27,7 @@ Options:
     -T, --tag-prefix <prefix>   Consider only tags with this prefix
     -v, --verbose               Print debug information
     --no-verbose                Do not print debug information
-    --version                   Print Versolve's version";
+    -V, --version               Print Versolve's version";
 
 /// Reports whether `argv` asks for the help message with "-h" or "--help"
 /// before "--". Unlike `parse_args`, this works even if the other arguments are
@@ -110,6 +110,7 @@ where
                 match c {
                     b'h' => set_args_value(&mut args.help, "-h", true)?,
                     b'v' => set_args_value(&mut args.verbose, "-v", true)?,
+                    b'V' => set_args_value(&mut args.version, "-V", true)?,
                     b'b' | b'B' | b'C' | b'T' => {
                         let c = char::from(c);
                         let (_, rest) = split_at_ascii(&arg, i + 1);
