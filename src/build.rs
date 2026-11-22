@@ -236,10 +236,14 @@ impl Config {
         // `.cargo_vcs_info.json` only if the package is in a Git repository.
         // Without these checks, a packaged crate in a Cargo home that is inside
         // a repository would get the version of that repository.
-        if [".cargo_vcs_info.json", "Cargo.toml.orig"]
-            .iter()
-            .any(|f| manifest_dir.join(f).exists())
-        {
+        let mut packaged = false;
+        for marker in [".cargo_vcs_info.json", "Cargo.toml.orig"] {
+            if manifest_dir.join(marker).exists() {
+                out.print(format_args!("rerun-if-changed={marker}"));
+                packaged = true;
+            }
+        }
+        if packaged {
             return Ok(None);
         }
 
@@ -630,7 +634,11 @@ mod tests {
             assert_fallback(result, &output);
             assert_eq!(
                 output,
-                format!("cargo:rerun-if-env-changed={BRANCH_VAR}\ncargo:rustc-env={VAR}=9.9.9\n"),
+                format!(
+                    "cargo:rerun-if-env-changed={BRANCH_VAR}\n\
+                    cargo:rerun-if-changed={marker}\n\
+                    cargo:rustc-env={VAR}=9.9.9\n"
+                ),
                 "{marker}"
             );
         }

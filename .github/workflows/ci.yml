@@ -37,6 +37,10 @@ jobs:
       - run: cargo doc --locked --no-deps
         env:
           RUSTDOCFLAGS: -D warnings
+      # Packaging verifies the crate in the same target directory. Check that
+      # the next build still embeds the version resolved from the repository.
+      - run: cargo package --locked
+      - run: cargo build --locked
       - name: Check the embedded version
         shell: bash
         run: |
