@@ -1,7 +1,7 @@
 //! Embed the resolved version in a package from its build script.
 //!
-//! Add Versolve to the build dependencies of the package and call
-//! [`Config::emit`] in its build script:
+//! Add Versolve to `[build-dependencies]` and call [`Config::emit`] in
+//! `build.rs`:
 //!
 //! ```no_run
 //! fn main() {
@@ -16,17 +16,17 @@
 //!
 //! The package can then read the version with `env!("MYAPP_VERSION")`.
 //!
-//! If the package is not in a Git repository, for example when it is built from
-//! crates.io, or if the version can't be resolved, the version from
-//! `Cargo.toml` is used instead. See [`Config::emit`] for the details.
+//! When the package is outside a Git repository (such as a crates.io tarball)
+//! or version resolution fails, the version from `Cargo.toml` is used instead.
+//! See [`Config::emit`] for details.
 //!
-//! When the version is resolved from the repository, the build script also sets
-//! variables for the hash and the date of the commit. For example, to print the
-//! version like `rustc --version` does:
+//! When resolved from Git, `emit` also sets variables for the commit hash and
+//! date, which lets you print version output in the style of
+//! `rustc --version`:
 //!
 //! ```
 //! # macro_rules! env { ($var:literal) => { "1.2.3+g1a2b3c4" } }
-//! // Leave out the build metadata, as the hash is printed separately.
+//! // Strip build metadata because the short hash is printed separately.
 //! let version = env!("MYAPP_VERSION").split('+').next().unwrap();
 //! let commit = option_env!("MYAPP_VERSION_COMMIT_SHORT_HASH")
 //!     .zip(option_env!("MYAPP_VERSION_COMMIT_DATE"));
@@ -44,15 +44,15 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use git2::{Commit, Repository};
+use git2::Repository;
 use semver::Version;
 
 use super::{
     error::{Error, ErrorKind},
-    resolve::{Resolver, open_repository},
+    resolve::{self, Resolved, Resolver},
 };
 
-/// Configures how the version is resolved in a build script.
+/// Configures how [`Config::emit`] resolves and embeds a package version.
 ///
 /// See the [module documentation](self) for an example.
 #[derive(Clone, Debug, Default)]
@@ -64,112 +64,114 @@ pub struct Config {
     time_zone: TimeZone,
 }
 
-/// The time zone of the commit date that [`Config::emit`] sets.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum TimeZone {
-    /// Coordinated Universal Time, so that the date doesn't depend on who
-    /// made the commit.
-    #[default]
-    Utc,
-    /// The time zone recorded in the commit, which is what
-    /// `git log --date=short` shows.
-    Committer,
-}
-
 impl Config {
-    /// Creates a configuration with the default settings.
+    /// Creates a configuration with default settings.
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Considers only the tags whose names start with `prefix`, for example
-    /// `v`. By default, the prefix is empty. See [`Resolver::tag_prefix`].
+    /// Considers only tags starting with `prefix` (e.g. `v`). Empty by default.
+    /// See [`Resolver::tag_prefix`].
     pub fn tag_prefix(mut self, prefix: impl Into<String>) -> Self {
         self.tag_prefix = prefix.into();
         self
     }
 
-    /// Omits the branch name from the versions of commits on the branch `name`.
+    /// Omits the branch name from versions resolved on `name`.
     /// See [`Resolver::default_branch`].
     pub fn default_branch(mut self, name: impl Into<String>) -> Self {
         self.default_branch = Some(name.into());
         self
     }
 
-    /// Name of an environment variable that overrides the branch name.
+    /// Names an environment variable that overrides the branch name.
     ///
-    /// Set the variable when `HEAD` may be detached, for example in CI. An
-    /// empty value counts as unset. The build script is run again when the
-    /// variable changes.
+    /// Useful when `HEAD` may be detached (e.g. in CI, `git rebase`, or
+    /// `git bisect`). An empty value counts as unset. When resolving from a Git
+    /// repository, changes to this variable rerun the build script.
     pub fn branch_env(mut self, var: impl Into<String>) -> Self {
         self.branch_env = Some(var.into());
         self
     }
 
-    /// Fail instead of falling back when a repository is found but the version
-    /// can't be resolved.
+    /// Fails instead of falling back to `Cargo.toml` when a repository is found
+    /// but version resolution fails.
     ///
-    /// Use this, for example, when building releases in CI, so that a shallow
-    /// clone fails the build instead of embedding the version from
-    /// `Cargo.toml`. A package that is not in a Git repository still uses the
-    /// version from `Cargo.toml`. By default, strict mode is off.
+    /// Useful for CI release builds where a shallow clone or detached `HEAD`
+    /// should abort the build rather than silently embed `CARGO_PKG_VERSION`.
+    /// Packages outside a Git repository still fall back to `Cargo.toml`. Off
+    /// by default.
     pub fn strict(mut self, strict: bool) -> Self {
         self.strict = strict;
         self
     }
 
-    /// Sets the time zone of the commit date. By default, the date is in UTC.
+    /// Sets the time zone used for `<var>_COMMIT_DATE`. Defaults to
+    /// [`TimeZone::Utc`].
     pub fn time_zone(mut self, time_zone: TimeZone) -> Self {
         self.time_zone = time_zone;
         self
     }
 
-    /// Prints the Cargo instructions and sets `var` for the package.
+    /// Emits Cargo instructions to set `var` to the resolved version and
+    /// returns the emitted [`Version`].
     ///
-    /// The package can read the version with `env!` using the name `var`. The
-    /// version is resolved from the Git repository that contains the package,
-    /// from the committed state only, so it never has `.dirty` in its build
-    /// metadata. The build script is run again when `HEAD`, the references, the
-    /// Git configuration, or `Cargo.toml` changes.
+    /// The package reads the version via `env!(<var>)`. Resolution inspects
+    /// only committed repository state, so `.dirty` is never appended.
     ///
-    /// If the version is resolved from the repository, the package can also
-    /// read the following variables with `option_env!`:
+    /// When the version comes from Git, `emit` also sets three optional
+    /// variables readable with `option_env!`:
     ///
-    /// - `<var>_COMMIT_HASH`: the full hash of the commit;
-    /// - `<var>_COMMIT_SHORT_HASH`: the abbreviated hash of the commit, as in
-    ///   the build metadata of the version; and
-    /// - `<var>_COMMIT_DATE`: the committer date of the commit as `YYYY-MM-DD`,
-    ///   in UTC unless [another time zone](Config::time_zone) is set.
+    /// - `<var>_COMMIT_HASH`: full commit hash;
+    /// - `<var>_COMMIT_SHORT_HASH`: abbreviated commit hash (matching the
+    ///   version's build metadata);
+    /// - `<var>_COMMIT_DATE`: committer date as `YYYY-MM-DD`, in UTC unless
+    ///   [overridden](Config::time_zone).
     ///
-    /// They are not set when the version from `Cargo.toml` is used.
+    /// These are omitted when falling back to `CARGO_PKG_VERSION`.
     ///
-    /// The version from `Cargo.toml` is used silently if the package:
+    /// # Fallback behavior
     ///
-    /// - was packaged with `cargo package`, for example when it is downloaded
-    ///   from a registry or vendored with `cargo vendor`;
-    /// - is not in a Git repository; or
-    /// - is in a directory that the repository ignores, such as a vendor
-    ///   directory.
+    /// `CARGO_PKG_VERSION` is used silently (and returned as `Ok`) if the
+    /// package:
     ///
-    /// If the version can't be resolved, for example because `HEAD` is detached
-    /// at a commit that has no version tag and the branch variable is not set,
-    /// the version from `Cargo.toml` is used and a warning is printed, unless
-    /// [strict mode](Config::strict) is on.
+    /// - was packaged with `cargo package` (registry downloads, `cargo vendor`,
+    ///   or `cargo package`/`cargo publish` verification builds);
+    /// - is not inside a Git repository; or
+    /// - is in a directory ignored by the repository (such as a `.gitignore`d
+    ///   vendor directory).
     ///
-    /// The instructions use the `cargo:` syntax, as Cargo rejects the newer
-    /// `cargo::` syntax in packages that set `rust-version` to a version older
-    /// than 1.77.
+    /// If the package is in a repository but resolution fails (e.g. a shallow
+    /// clone or detached `HEAD` without a tag or branch override), `emit`
+    /// prints a `cargo:warning` and falls back to `CARGO_PKG_VERSION`, unless
+    /// [strict mode](Config::strict) is enabled.
+    ///
+    /// # Build script reruns
+    ///
+    /// When resolving from a Git repository, `emit` prints `rerun-if-changed`
+    /// for `HEAD`, refs, Git configuration, `shallow` (if present), and
+    /// `Cargo.toml`, plus `rerun-if-env-changed` for the configured
+    /// [`branch_env`](Config::branch_env).
+    ///
+    /// Printing any `rerun-if-*` instruction disables Cargo's default behavior
+    /// of rerunning `build.rs` whenever any package file changes. If your build
+    /// script reads other files or variables, emit rerun instructions for them
+    /// as well.
+    ///
+    /// If the repository can't be opened (for example because it uses the
+    /// reftable format), no Git paths are watched, so fixing the repository
+    /// doesn't rerun the build script by itself. The fallback version stays
+    /// until a package file changes or you run `cargo clean`.
     ///
     /// # Errors
     ///
-    /// Returns an error only in strict mode, when the package is in a Git
-    /// repository but the version can't be resolved.
+    /// Returns an error only in [strict mode](Config::strict), when the package
+    /// is in a Git repository and version resolution fails.
     ///
     /// # Panics
     ///
-    /// Panics if not called from a Cargo build script, or if writing to the
-    /// standard output fails.
+    /// Panics if not called from a Cargo build script, or if writing to stdout
+    /// fails.
     pub fn emit(&self, var: &str) -> Result<Version, Error> {
         self.emit_to(var, &mut io::stdout().lock(), &|name| env::var_os(name))
     }
@@ -188,15 +190,7 @@ impl Config {
             .unwrap_or_else(|| panic!("CARGO_PKG_VERSION is not a valid version: {pkg_version:?}"));
         let mut out = Instructions(out);
 
-        let branch = match &self.branch_env {
-            Some(name) => {
-                out.print(format_args!("rerun-if-env-changed={name}"));
-                branch_from_env(env, name)
-            }
-            None => Ok(None),
-        };
-
-        let (version, commit) = match self.resolve(&manifest_dir, branch, &mut out) {
+        let (version, commit) = match self.resolve(&manifest_dir, env, &mut out) {
             Ok(Some((version, commit))) => (version, Some(commit)),
             Ok(None) => (pkg_version, None),
             Err(e) if self.strict => return Err(e),
@@ -225,19 +219,18 @@ impl Config {
         Ok(version)
     }
 
-    /// Resolves the version of the repository that contains `manifest_dir` and
-    /// reads the information of the commit it is resolved for. Returns `None`
-    /// if the version from `Cargo.toml` should be used without a warning.
+    /// Returns `None` when `CARGO_PKG_VERSION` should be used without warning.
     fn resolve(
         &self,
         manifest_dir: &Path,
-        branch: Result<Option<String>, Error>,
+        env: &dyn Fn(&str) -> Option<OsString>,
         out: &mut Instructions<'_>,
     ) -> Result<Option<(Version, CommitInfo)>, Error> {
-        // `cargo package` always writes `Cargo.toml.orig`, but it writes
-        // `.cargo_vcs_info.json` only if the package is in a Git repository.
-        // Without these checks, a packaged crate in a Cargo home that is inside
-        // a repository would get the version of that repository.
+        // `cargo package` always writes `Cargo.toml.orig`, and writes
+        // `.cargo_vcs_info.json` when packaged from a Git repository. Watching
+        // whichever marker exists also forces a rebuild when returning from a
+        // `cargo package` verification build to the working checkout in the
+        // same target directory.
         let mut packaged = false;
         for marker in [".cargo_vcs_info.json", "Cargo.toml.orig"] {
             if manifest_dir.join(marker).exists() {
@@ -249,7 +242,7 @@ impl Config {
             return Ok(None);
         }
 
-        let repo = match open_repository(manifest_dir) {
+        let repo = match resolve::open_repository(manifest_dir) {
             Err(e) if e.kind() == ErrorKind::RepositoryNotFound => return Ok(None),
             repo => repo?,
         };
@@ -258,7 +251,15 @@ impl Config {
             return Ok(None);
         }
 
+        if let Some(name) = &self.branch_env {
+            out.print(format_args!("rerun-if-env-changed={name}"));
+        }
         print_rerun_instructions(&repo, out);
+
+        let branch = match &self.branch_env {
+            Some(name) => branch_from_env(env, name)?,
+            None => None,
+        };
 
         let mut resolver = Resolver::new(manifest_dir)
             .tag_prefix(self.tag_prefix.clone())
@@ -266,17 +267,27 @@ impl Config {
         if let Some(name) = &self.default_branch {
             resolver = resolver.default_branch(name.clone());
         }
-        if let Some(name) = branch? {
+        if let Some(name) = branch {
             resolver = resolver.branch(name);
         }
 
-        let version = resolver.resolve_repository(&repo)?;
-        let commit = CommitInfo::new(&repo.head()?.peel_to_commit()?, self.time_zone)?;
-        Ok(Some((version, commit)))
+        let resolved = resolver.resolve_repository(&repo)?;
+        let commit = CommitInfo::from_resolved(&resolved, self.time_zone);
+        Ok(Some((resolved.version, commit)))
     }
 }
 
-/// The information of the commit that the version is resolved for.
+/// Time zone used for `<var>_COMMIT_DATE` emitted by [`Config::emit`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum TimeZone {
+    /// Coordinated Universal Time, independent of the committer's local clock.
+    #[default]
+    Utc,
+    /// The time zone recorded in the commit, matching `git log --date=short`.
+    Committer,
+}
+
 struct CommitInfo {
     hash: String,
     short_hash: String,
@@ -284,25 +295,33 @@ struct CommitInfo {
 }
 
 impl CommitInfo {
-    fn new(commit: &Commit<'_>, time_zone: TimeZone) -> Result<Self, Error> {
-        let short_hash = commit.as_object().short_id()?;
-        let short_hash = short_hash.as_str()?;
-        let time = commit.time();
+    fn from_resolved(resolved: &Resolved, time_zone: TimeZone) -> Self {
         let offset = match time_zone {
             TimeZone::Utc => 0,
-            TimeZone::Committer => i64::from(time.offset_minutes()) * 60,
+            TimeZone::Committer => i64::from(resolved.commit_time.offset_minutes()) * 60,
         };
-        let (year, month, day) = civil_date(time.seconds() + offset);
-        Ok(Self {
-            hash: commit.id().to_string(),
-            short_hash: short_hash.to_owned(),
+        let (year, month, day) = civil_date(resolved.commit_time.seconds() + offset);
+        Self {
+            hash: resolved.commit_id.to_string(),
+            short_hash: resolved.short_id.clone(),
             date: format!("{year:04}-{month:02}-{day:02}"),
-        })
+        }
     }
 }
 
-/// Converts seconds since the Unix epoch to a date in the proleptic Gregorian
-/// calendar, using the algorithm from
+/// Uses `cargo:` rather than `cargo::` because Cargo rejects `cargo::` in
+/// packages whose `rust-version` is older than 1.77.
+struct Instructions<'a>(&'a mut dyn Write);
+
+impl Instructions<'_> {
+    fn print(&mut self, instruction: fmt::Arguments<'_>) {
+        if let Err(e) = writeln!(self.0, "cargo:{instruction}") {
+            panic!("failed printing to stdout: {e}");
+        }
+    }
+}
+
+/// Converts seconds since the Unix epoch to a proleptic Gregorian date:
 /// <https://howardhinnant.github.io/date_algorithms.html#civil_from_days>.
 fn civil_date(seconds: i64) -> (i64, i64, i64) {
     let days = seconds.div_euclid(86_400) + 719_468;
@@ -322,20 +341,12 @@ fn civil_date(seconds: i64) -> (i64, i64, i64) {
     (year, month, day)
 }
 
-/// Writes Cargo instructions in the `cargo:` syntax.
-struct Instructions<'a>(&'a mut dyn Write);
-
-impl Instructions<'_> {
-    fn print(&mut self, instruction: fmt::Arguments<'_>) {
-        if let Err(e) = writeln!(self.0, "cargo:{instruction}") {
-            panic!("failed printing to stdout: {e}");
-        }
-    }
-}
-
 fn cargo_env(env: &dyn Fn(&str) -> Option<OsString>, name: &str) -> OsString {
     env(name).unwrap_or_else(|| {
-        panic!("{name} is not set, versolve::build::Config::emit must be called from a Cargo build script")
+        panic!(
+            "{name} is not set; versolve::build::Config::emit must be called from a Cargo build \
+            script"
+        )
     })
 }
 
@@ -355,14 +366,11 @@ fn branch_from_env(
     }
 }
 
-/// Reports whether `dir` is ignored in the working tree of `repo`, for example
-/// because it is a vendor or a target directory.
 fn is_ignored(repo: &Repository, dir: &Path) -> Result<bool, Error> {
     let Some(workdir) = repo.workdir() else {
         return Ok(false);
     };
-    // Compare the canonical paths, as the paths may go through symbolic links,
-    // like `/tmp` on macOS.
+    // Canonicalize both paths to handle symlinks such as `/tmp` on macOS.
     let (Ok(workdir), Ok(dir)) = (workdir.canonicalize(), dir.canonicalize()) else {
         return Ok(false);
     };
@@ -372,16 +380,14 @@ fn is_ignored(repo: &Repository, dir: &Path) -> Result<bool, Error> {
     }
 }
 
-/// Prints the instructions to rerun the build script when the committed state
-/// of the repository changes. The working tree is not tracked, as the version
-/// doesn't depend on it.
 fn print_rerun_instructions(repo: &Repository, out: &mut Instructions<'_>) {
     let git_dir = repo.path();
     let common_dir = repo.commondir();
-    // Cargo considers a missing path always changed, so print only the paths
-    // that exist.
+    // Cargo treats missing rerun-if-changed paths as always changed, so only
+    // emit optional paths that exist.
     let optional = [
         Ok(common_dir.join("packed-refs")),
+        Ok(common_dir.join("shallow")),
         Ok(common_dir.join("config")),
         Ok(git_dir.join("config.worktree")),
         git2::Config::find_global(),
@@ -401,7 +407,7 @@ fn print_rerun_instructions(repo: &Repository, out: &mut Instructions<'_>) {
 mod tests {
     use std::{fs, path::Path};
 
-    use git2::{Signature, Time};
+    use git2::{Commit, Signature, Time};
     use tempfile::TempDir;
 
     use super::{
@@ -419,9 +425,6 @@ mod tests {
             .branch_env(BRANCH_VAR)
     }
 
-    /// Calls `emit_to` for a package in `dir` with the version 9.9.9 and the
-    /// additional environment variables `vars`. Returns the result and the
-    /// printed instructions.
     fn emit(
         config: &Config,
         dir: &Path,
@@ -458,7 +461,6 @@ mod tests {
         );
     }
 
-    /// Returns the canonical paths from the `rerun-if-changed` instructions.
     fn rerun_paths(output: &str) -> Vec<PathBuf> {
         output
             .lines()
@@ -506,8 +508,6 @@ mod tests {
         }
     }
 
-    /// Commits to the current branch with `time` as the author and committer
-    /// time.
     fn commit_with_time(repo: &TestRepo, time: Time) {
         let git = Repository::open(repo.path()).unwrap();
         let tree_oid = git.treebuilder(None).unwrap().write().unwrap();
@@ -586,6 +586,26 @@ mod tests {
     }
 
     #[test]
+    fn shallow_marker_only_if_it_exists() {
+        let repo = tagged_repo();
+        let (_, output) = emit(&config(), repo.path(), &[]);
+        assert!(!output.contains("shallow"), "{output}");
+
+        let clone = TempDir::new().unwrap();
+        repo.git(&[
+            "clone",
+            "--no-local",
+            "--depth=1",
+            repo.path().to_str().unwrap(),
+            clone.path().to_str().unwrap(),
+        ]);
+        let shallow = canonical(clone.path().join(".git/shallow"));
+        let (result, output) = emit(&config(), clone.path(), &[]);
+        assert_fallback(result, &output);
+        assert!(rerun_paths(&output).contains(&shallow), "{output}");
+    }
+
+    #[test]
     fn package_in_subdirectory() {
         let repo = tagged_repo();
         let package = repo.path().join("crates/app");
@@ -637,8 +657,7 @@ mod tests {
             assert_eq!(
                 output,
                 format!(
-                    "cargo:rerun-if-env-changed={BRANCH_VAR}\n\
-                    cargo:rerun-if-changed={marker}\n\
+                    "cargo:rerun-if-changed={marker}\n\
                     cargo:rustc-env={VAR}=9.9.9\n"
                 ),
                 "{marker}"
@@ -650,7 +669,7 @@ mod tests {
     fn no_repository_falls_back() {
         let dir = TempDir::new().unwrap();
 
-        let (result, output) = emit(&Config::new(), dir.path(), &[]);
+        let (result, output) = emit(&config(), dir.path(), &[]);
         assert_fallback(result, &output);
         assert_eq!(output, format!("cargo:rustc-env={VAR}=9.9.9\n"));
     }
@@ -664,7 +683,7 @@ mod tests {
         for dir in ["vendor/app", "target", "crates/target/app"] {
             let package = repo.path().join(dir);
             fs::create_dir_all(&package).unwrap();
-            let (result, output) = emit(&Config::new(), &package, &[]);
+            let (result, output) = emit(&config(), &package, &[]);
             assert_fallback(result, &output);
             assert_eq!(output, format!("cargo:rustc-env={VAR}=9.9.9\n"), "{dir}");
         }

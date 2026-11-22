@@ -54,8 +54,7 @@ impl TestRepo {
         Resolver::new(self.path())
     }
 
-    /// Runs `git` in the repository without reading the user's
-    /// configuration.
+    /// Runs `git` in the repository without reading the user's configuration.
     pub(crate) fn git(&self, args: &[&str]) {
         let mut cmd = Command::new("git");
         for (key, _) in env::vars_os() {
@@ -115,9 +114,9 @@ impl TestRepo {
             .unwrap();
     }
 
-    /// Creates a commit with the given parents and commit time without
-    /// updating any references, so that the tests control the order in which
-    /// the commits are walked.
+    /// Creates a commit with the given parents and commit time without updating
+    /// any references, so that the tests control the order in which the commits
+    /// are walked.
     pub(crate) fn commit_at(&self, parents: &[Oid], time: i64) -> Oid {
         let repo = Repository::open(self.path()).unwrap();
         let tree_oid = repo.treebuilder(None).unwrap().write().unwrap();

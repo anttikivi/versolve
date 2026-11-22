@@ -10,41 +10,40 @@ and this project adheres to
 
 ### Added
 
-- A library API for resolving versions from Rust code: `Resolver`, `Error`, and
-  `ErrorKind`. The version is a `semver::Version`, and the `semver` crate is
-  re-exported.
-- The library logs debug messages with the `log` crate.
-- The `versolve::build` module for embedding the resolved version in a package
-  from its build script. When the version is resolved from the repository, it
-  also sets `<VAR>_COMMIT_HASH`, `<VAR>_COMMIT_SHORT_HASH`, and
-  `<VAR>_COMMIT_DATE`, so that the package can print its version like
-  `rustc --version` does. The commit date is in UTC by default, and
-  `Config::time_zone` can set it to the committer's time zone instead.
-- `--verbose --version` prints the full version, commit hash, commit date, and
-  host in the format of `rustc -vV`.
-- The `sha256` and `vendored-libgit2` features, both on by default, so that
-  SHA-256 support and the bundled libgit2 can be left out. With the default
-  features, libgit2 is still always built from the bundled sources.
-- Short option `-V` for printing the version.
+- Library API (`Resolver`, `Error`, `ErrorKind`, and re-exported `semver`) with
+  debug logging via `log`.
+- `versolve::build` module for embedding the resolved version plus
+  `<VAR>_COMMIT_HASH`, `<VAR>_COMMIT_SHORT_HASH`, and `<VAR>_COMMIT_DATE` (UTC
+  by default, configurable via `Config::time_zone`) from `build.rs`. The build
+  script reruns when `HEAD`, refs, Git configuration, or the shallow-clone state
+  changes.
+- `-V` short option for `--version`, and `-vV` / `--verbose --version` output
+  matching the style of `rustc -vV`.
+- `vendored-libgit2` Cargo feature (on by default) for building the bundled
+  libgit2.
 
 ### Changed
 
-- Versolve is now licensed under either of the MIT license or the Apache
-  License, Version 2.0, at your option. Earlier releases remain under the GNU
-  General Public License v3.0 or later.
-- `--version` prints the version in the format of `rustc --version`, for example
-  `versolve 0.3.0 (1a2b3c4 2026-11-21)`. The build metadata is left out of the
-  version, and the abbreviated hash and the date of the commit in UTC follow it
-  in parentheses. The commit is omitted when Versolve is built from a packaged
-  crate.
-- When building from source, the build script also finds the repository from the
-  parent directories, but leaves out packaged crates and directories that the
-  repository ignores.
+- Relicensed under `MIT OR Apache-2.0` (earlier releases remain under
+  `GPL-3.0-or-later`).
+- `--version` output now matches the style of `rustc --version`, e.g.
+  `versolve 0.3.0 (1a2b3c4 2026-11-21)`, omitting the commit info in packaged
+  builds.
+- SHA-256 repository support, which was always built in to 0.2.0, now requires
+  the opt-in `sha256` feature so that library users don't force
+  `git2/unstable-sha256` on every `git2` user in their build. A plain
+  `cargo install versolve` no longer supports SHA-256 repositories; install with
+  `cargo install versolve --features sha256` to keep it.
+- Build-script version resolution discovers repositories in parent directories
+  while ignoring packaged crates and `.gitignore`d directories.
 
 ### Fixed
 
-- When building from source with a detached `HEAD`, the build warning now
-  suggests setting `VERSOLVE_BUILD_BRANCH` instead of passing `--branch`.
+- `--no-verbose` can now override an earlier `-v` / `--verbose` flag, and vice
+  versa, instead of failing as a duplicate option. Repeating `-v` / `--verbose`
+  is still an error.
+- Detached-`HEAD` warnings when building Versolve from source now suggest
+  `VERSOLVE_BUILD_BRANCH` instead of `--branch`.
 
 ## [0.2.0] - 2026-11-21
 

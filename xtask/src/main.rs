@@ -11,6 +11,25 @@ const REUSE: &str = "--from=reuse[charset-normalizer]==6.3.0";
 
 type Result<T = ()> = std::result::Result<T, Box<dyn std::error::Error>>;
 
+struct TempDir(PathBuf);
+
+impl TempDir {
+    fn new() -> Result<Self> {
+        let nanos = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+        let mut name = OsString::from("versolve-e2e-");
+        name.push(format!("{}-{nanos}", process::id()));
+        let path = env::temp_dir().join(name);
+        fs::create_dir(&path)?;
+        Ok(Self(path))
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
 fn run() -> Result {
     let mut it = env::args().skip(1);
     match it.next().as_deref() {
@@ -93,7 +112,6 @@ fn e2e() -> Result {
         repo.join("app/src/main.rs"),
         "fn main() {\n    println!(\"{}\", env!(\"APP_VERSION\"));\n}\n",
     )?;
-    // Use the same dependency versions as Versolve.
     fs::copy(root.join("Cargo.lock"), repo.join("Cargo.lock"))?;
 
     git(repo, &["init", "--initial-branch=main"])?;
@@ -115,10 +133,45 @@ fn e2e() -> Result {
         }
     }
 
+    // Verify that unshallowing without moving HEAD or fetching tags reruns the
+    // build script and replaces the fallback version.
+    let shallow_dir = TempDir::new()?;
+    let shallow = shallow_dir.0.as_path();
+    let repo_str = repo.to_str().ok_or("non-UTF-8 temporary path")?;
+    let shallow_str = shallow.to_str().ok_or("non-UTF-8 temporary path")?;
+    git(
+        repo,
+        &[
+            "clone",
+            "--no-local",
+            "--depth=1",
+            "--no-tags",
+            repo_str,
+            shallow_str,
+        ],
+    )?;
+
+    let fallback = run_app(shallow, &root)?;
+    eprintln!("shallow app version: {fallback}");
+    if fallback != "0.0.0" {
+        return Err(format!("expected fallback version 0.0.0, got {fallback}").into());
+    }
+
+    git(shallow, &["fetch", "--unshallow", "--no-tags"])?;
+    let head = git(shallow, &["rev-parse", "HEAD"])?;
+    let unshallowed = run_app(shallow, &root)?;
+    eprintln!("unshallowed app version: {unshallowed}");
+    let expected = "0.1.0-0.3+g";
+    let matches = unshallowed
+        .strip_prefix(expected)
+        .is_some_and(|id| id.len() >= 7 && head.starts_with(id));
+    if !matches {
+        return Err(format!("expected {expected}<abbreviated {head}>, got {unshallowed}").into());
+    }
+
     Ok(())
 }
 
-/// Runs the app in `repo` and returns its output.
 fn run_app(repo: &Path, root: &Path) -> Result<String> {
     let cargo = env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     eprintln!("+ cargo run --package app");
@@ -135,8 +188,6 @@ fn run_app(repo: &Path, root: &Path) -> Result<String> {
     Ok(String::from_utf8(output.stdout)?.trim_end().to_owned())
 }
 
-/// Runs `git` in `repo` without reading the user's configuration and returns
-/// its standard output.
 fn git(repo: &Path, args: &[&str]) -> Result<String> {
     let mut cmd = Command::new("git");
     for (key, _) in env::vars_os() {
@@ -162,24 +213,4 @@ fn git(repo: &Path, args: &[&str]) -> Result<String> {
         .into());
     }
     Ok(String::from_utf8(output.stdout)?.trim_end().to_owned())
-}
-
-/// A temporary directory that is removed when dropped.
-struct TempDir(PathBuf);
-
-impl TempDir {
-    fn new() -> Result<Self> {
-        let nanos = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
-        let mut name = OsString::from("versolve-e2e-");
-        name.push(format!("{}-{nanos}", process::id()));
-        let path = env::temp_dir().join(name);
-        fs::create_dir(&path)?;
-        Ok(Self(path))
-    }
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
 }

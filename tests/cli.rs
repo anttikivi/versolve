@@ -66,8 +66,6 @@ fn help_is_shown_despite_invalid_arguments() {
     }
 }
 
-/// Runs Versolve with `args` and returns its standard output, checking that it
-/// succeeds.
 fn versolve_stdout(args: &[&str]) -> String {
     let output = versolve(args);
     assert!(
@@ -177,8 +175,8 @@ fn libgit2_errors_omit_class_and_code() {
     assert!(stderr.contains("class="), "{stderr}");
 }
 
-/// Runs `git` in `dir` without reading the user's configuration and returns
-/// its standard output.
+/// Runs `git` in `dir` without reading the user's configuration and returns its
+/// standard output.
 fn git(dir: &Path, args: &[&str]) -> String {
     let mut cmd = Command::new("git");
     for (key, _) in env::vars_os() {

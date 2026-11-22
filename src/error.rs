@@ -1,10 +1,9 @@
 use std::{error, fmt};
 
-/// An error that occurred while resolving a version.
+/// An error returned while resolving a version.
 ///
-/// The [`Display`](fmt::Display) implementation prints a message that is meant
-/// for the user and suggests a fix where possible. Use [`Error::kind`] to
-/// handle specific errors in code.
+/// [`Display`](fmt::Display) formats a user-facing message and suggests a fix
+/// where possible. Use [`Error::kind`] to handle specific error cases in code.
 #[derive(Debug)]
 pub struct Error {
     kind: ErrorKind,
@@ -21,8 +20,6 @@ impl Error {
         }
     }
 
-    /// Creates an error caused by the libgit2 error `source`. The caller logs
-    /// `source`, as the full error is shown only in the debug output.
     pub(crate) fn with_source(
         kind: ErrorKind,
         message: impl Into<String>,
@@ -35,7 +32,7 @@ impl Error {
         }
     }
 
-    /// Returns the kind of the error.
+    /// Returns the kind of this error.
     pub fn kind(&self) -> ErrorKind {
         self.kind
     }
@@ -62,33 +59,32 @@ impl From<git2::Error> for Error {
     }
 }
 
-/// The kind of an [`Error`].
+/// The category of an [`Error`].
 ///
-/// More kinds may be added in the future, so matching on this type requires a
-/// wildcard arm.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Additional variants may be added in future versions, so matching on this
+/// enum requires a wildcard arm.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum ErrorKind {
-    /// No Git repository was found at the given path or in any of its parent
-    /// directories.
+    /// No Git repository was found at the given path or in any parent
+    /// directory.
     RepositoryNotFound,
-    /// The repository is a shallow clone, so its history may be incomplete.
+    /// The repository is a shallow clone so its history may be incomplete.
     ShallowClone,
     /// The current branch has no commits.
     NoCommits,
-    /// `HEAD` is detached at a commit that has no version tag, and no branch
-    /// name was given.
+    /// `HEAD` is detached at a commit without a version tag and no branch name
+    /// was supplied.
     DetachedHead,
-    /// The repository uses a feature that is not supported, such as the
-    /// reftable reference format or a split index.
+    /// The repository uses an unsupported feature (such as the reftable
+    /// reference format or a split index).
     UnsupportedRepository,
-    /// A version tag can't be read, for example because it points to an
-    /// object that is missing from the repository.
+    /// A version tag cannot be read (e.g. it points to a missing object).
     InvalidTag,
-    /// The patch version of the latest tag can't be incremented, as it is
-    /// the maximum value.
+    /// The patch number of the base tag is already `u64::MAX` and cannot be
+    /// incremented.
     VersionOverflow,
-    /// The input is invalid, for example the branch name is empty.
+    /// An input argument is invalid (e.g. an empty branch name).
     InvalidInput,
     /// Any other error from libgit2.
     Git,

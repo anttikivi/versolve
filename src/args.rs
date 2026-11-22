@@ -14,7 +14,15 @@ pub struct Args {
     pub version: Option<bool>,
 }
 
-pub const USAGE: &str = "Resolve a unique version number for a Git revision
+#[derive(Clone, Copy)]
+enum ValueOption {
+    Branch,
+    DefaultBranch,
+    Repository,
+    TagPrefix,
+}
+
+pub const HELP_MESSAGE: &str = "Resolve a unique version number for a Git revision
 
 Usage: versolve [options]
 
@@ -23,15 +31,16 @@ Options:
     -b, --branch <name>         Use this branch name instead of the current branch
     -B, --default-branch <name> Omit the branch name from versions on this branch
     -C, --repository <path>     Resolve the version for this repository
-    -T, --tag-prefix <prefix>   Consider only tags with this prefix, for example v
-    -v, --verbose               Print debug information to standard error
-    --no-verbose                Do not print debug information
+    -T, --tag-prefix <prefix>   Consider only tags with this prefix (e.g. v)
+    -v, --verbose               Print debug output to stderr, or full details with -V
+    --no-verbose                Disable verbose output
     -h, --help                  Print the help message
     -V, --version               Print the version of Versolve";
 
 /// Reports whether `argv` asks for the help message with "-h" or "--help"
 /// before "--". Unlike `parse_args`, this works even if the other arguments are
-/// invalid.
+/// invalid. The one caveat is that it returns `true` even if `--help` would've
+/// been read as the value for another flag, were the flags valid.
 pub fn asks_for_help(argv: &[OsString]) -> bool {
     argv.iter()
         .take_while(|a| a.as_os_str() != "--")
@@ -44,11 +53,12 @@ where
 {
     let mut args = Args::default();
     let mut it = argv.into_iter();
+    let mut verbose_seen = false;
+    let mut no_verbose_seen = false;
 
     while let Some(arg) = it.next() {
-        // Only the option names need to be valid UTF-8. Look at the encoded
-        // bytes so that values attached to the options like "-C<path>" don't
-        // need to be.
+        // Inspect the encoded bytes so non-UTF-8 values attached to options
+        // like `-C<path>` are preserved.
         let bytes = arg.as_encoded_bytes();
 
         if bytes == b"--" {
@@ -73,35 +83,29 @@ where
             match name {
                 "--help" => set_args_value(&mut args.help, name, flag(name, &inline_val)?)?,
                 "--version" => set_args_value(&mut args.version, name, flag(name, &inline_val)?)?,
-                "--verbose" => set_args_value(&mut args.verbose, name, flag(name, &inline_val)?)?,
+                "--verbose" => set_verbose(
+                    &mut args.verbose,
+                    &mut verbose_seen,
+                    name,
+                    flag(name, &inline_val)?,
+                )?,
                 "--no-verbose" => {
-                    no_value_flag(name, &inline_val)?;
-                    set_args_value(&mut args.verbose, "--verbose", false)?;
+                    no_flag(name, &inline_val)?;
+                    set_verbose(&mut args.verbose, &mut no_verbose_seen, name, false)?;
                 }
                 "--branch" | "--default-branch" | "--repository" | "--tag-prefix" => {
+                    let opt = match name {
+                        "--branch" => ValueOption::Branch,
+                        "--default-branch" => ValueOption::DefaultBranch,
+                        "--repository" => ValueOption::Repository,
+                        "--tag-prefix" => ValueOption::TagPrefix,
+                        _ => unreachable!(),
+                    };
                     let val = inline_val
                         .take()
                         .or_else(|| it.next())
                         .ok_or_else(|| format!("option \"{name}\" requires a value"))?;
-                    match name {
-                        "--branch" => {
-                            let val = utf8(name, val)?;
-                            if val.is_empty() {
-                                return Err(format!("value for \"{name}\" cannot be empty"));
-                            }
-                            set_args_value(&mut args.branch, name, val)?
-                        }
-                        "--default-branch" => {
-                            set_args_value(&mut args.default_branch, name, utf8(name, val)?)?;
-                        }
-                        "--repository" => {
-                            set_args_value(&mut args.repository, name, PathBuf::from(val))?;
-                        }
-                        "--tag-prefix" => {
-                            set_args_value(&mut args.tag_prefix, name, utf8(name, val)?)?;
-                        }
-                        _ => unreachable!(),
-                    }
+                    set_value_option(&mut args, opt, name, val)?;
                 }
                 _ => return Err(format!("unknown command-line argument: {name:?}")),
             }
@@ -109,33 +113,25 @@ where
             for (i, &c) in cluster.iter().enumerate() {
                 match c {
                     b'h' => set_args_value(&mut args.help, "-h", true)?,
-                    b'v' => set_args_value(&mut args.verbose, "-v", true)?,
+                    b'v' => set_verbose(&mut args.verbose, &mut verbose_seen, "-v", true)?,
                     b'V' => set_args_value(&mut args.version, "-V", true)?,
                     b'b' | b'B' | b'C' | b'T' => {
-                        let c = char::from(c);
+                        let (opt, name) = match c {
+                            b'b' => (ValueOption::Branch, "-b"),
+                            b'B' => (ValueOption::DefaultBranch, "-B"),
+                            b'C' => (ValueOption::Repository, "-C"),
+                            b'T' => (ValueOption::TagPrefix, "-T"),
+                            _ => unreachable!(),
+                        };
                         let (_, rest) = split_at_ascii(&arg, i + 1);
                         let val = if rest.is_empty() {
                             it.next()
-                                .ok_or_else(|| format!("option \"-{c}\" requires a value"))?
+                                .ok_or_else(|| format!("option \"{name}\" requires a value"))?
                         } else {
                             rest.to_os_string()
                         };
-                        match c {
-                            'b' => {
-                                let val = utf8("-b", val)?;
-                                if val.is_empty() {
-                                    return Err("value for \"-b\" cannot be empty".into());
-                                }
-                                set_args_value(&mut args.branch, "-b", val)?;
-                            }
-                            'B' => {
-                                set_args_value(&mut args.default_branch, "-B", utf8("-B", val)?)?;
-                            }
-                            'C' => set_args_value(&mut args.repository, "-C", PathBuf::from(val))?,
-                            'T' => set_args_value(&mut args.tag_prefix, "-T", utf8("-T", val)?)?,
-                            _ => unreachable!(),
-                        }
-                        break; // consumes the whole argument
+                        set_value_option(&mut args, opt, name, val)?;
+                        break; // consumes the rest of the argument
                     }
                     _ => {
                         let c = String::from_utf8_lossy(&cluster[i..]);
@@ -152,17 +148,33 @@ where
     Ok(args)
 }
 
-/// Splits `s` into the parts before and after the ASCII character at the index
-/// `i` of its encoded bytes. The parts don't need to be valid UTF-8.
-///
-/// # Panics
-///
-/// Panics if the byte at the index `i` is not an ASCII character.
+fn set_value_option(
+    args: &mut Args,
+    opt: ValueOption,
+    name: &str,
+    val: OsString,
+) -> Result<(), String> {
+    match opt {
+        ValueOption::Branch => {
+            let val = utf8(name, val)?;
+            if val.is_empty() {
+                return Err(format!("value for \"{name}\" cannot be empty"));
+            }
+            set_args_value(&mut args.branch, name, val)
+        }
+        ValueOption::DefaultBranch => {
+            set_args_value(&mut args.default_branch, name, utf8(name, val)?)
+        }
+        ValueOption::Repository => set_args_value(&mut args.repository, name, PathBuf::from(val)),
+        ValueOption::TagPrefix => set_args_value(&mut args.tag_prefix, name, utf8(name, val)?),
+    }
+}
+
 fn split_at_ascii(s: &OsStr, i: usize) -> (&OsStr, &OsStr) {
     let bytes = s.as_encoded_bytes();
     assert!(bytes[i].is_ascii());
-    // SAFETY: The parts are split from an `OsStr` immediately before and after
-    // an ASCII character, which `OsStr::from_encoded_bytes_unchecked` allows.
+    // SAFETY: Splitting immediately before and after an ASCII byte preserves
+    // the OS string encoding invariant (including WTF-8 on Windows).
     unsafe {
         (
             OsStr::from_encoded_bytes_unchecked(&bytes[..i]),
@@ -176,6 +188,20 @@ fn set_args_value<T>(field: &mut Option<T>, name: &str, val: T) -> Result<(), St
         return Err(format!("option \"{name}\" is set twice"));
     }
 
+    *field = Some(val);
+    Ok(())
+}
+
+fn set_verbose(
+    field: &mut Option<bool>,
+    seen: &mut bool,
+    name: &str,
+    val: bool,
+) -> Result<(), String> {
+    if *seen {
+        return Err(format!("option \"{name}\" is set twice"));
+    }
+    *seen = true;
     *field = Some(val);
     Ok(())
 }
@@ -198,7 +224,7 @@ fn flag(name: &str, inline_val: &Option<OsString>) -> Result<bool, String> {
     }
 }
 
-fn no_value_flag(name: &str, inline_val: &Option<OsString>) -> Result<(), String> {
+fn no_flag(name: &str, inline_val: &Option<OsString>) -> Result<(), String> {
     match inline_val {
         None => Ok(()),
         Some(_) => Err(format!("option \"{name}\" does not take a value")),
@@ -347,12 +373,27 @@ mod tests {
         for argv in [
             &["--branch", "a", "--branch", "b"][..],
             &["--branch", "a", "-b", "b"],
+            &["-C", "a", "--repository", "b"],
+            &["-V", "--version"],
             &["-vv"],
             &["-v", "--verbose"],
-            &["--verbose", "--no-verbose"],
-            &["-C", "a", "--repository", "b"],
+            &["--verbose=false", "-v"],
+            &["-v", "--no-verbose", "-v"],
+            &["--no-verbose", "--no-verbose"],
         ] {
             assert!(parse(argv).is_err(), "{argv:?} should fail");
+        }
+    }
+
+    #[test]
+    fn no_verbose_and_verbose_override_each_other() {
+        for (argv, expected) in [
+            (&["--verbose", "--no-verbose"][..], false),
+            (&["-v", "--no-verbose"], false),
+            (&["--no-verbose", "-v"], true),
+            (&["--no-verbose", "--verbose=true"], true),
+        ] {
+            assert_eq!(parse(argv).unwrap().verbose, Some(expected), "{argv:?}");
         }
     }
 

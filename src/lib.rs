@@ -1,14 +1,14 @@
 //! Resolve a unique [semantic version](https://semver.org/) for every revision
 //! of a Git repository.
 //!
-//! Versolve takes the version from the repository's tags. For commits between
-//! tags, it builds a pre-release version from the commit's distance to the
-//! latest tag and the branch name, so later revisions always get a higher
-//! version. See the
-//! [README](https://github.com/anttikivi/versolve#how-the-version-is-resolved)
-//! for the rules.
+//! Versolve derives versions from the highest-precedence version tag reachable
+//! from `HEAD`. For commits after that tag, it constructs a pre-release version
+//! from the commit distance and branch name. When tags increase monotonically
+//! across history, later revisions sort higher under SemVer precedence rules.
 //!
-//! Use [`Resolver`] to resolve the version of a repository:
+//! # Resolving a version
+//!
+//! Use [`Resolver`] to resolve a repository directly:
 //!
 //! ```no_run
 //! let version = versolve::Resolver::new(".")
@@ -19,12 +19,30 @@
 //! # Ok::<(), versolve::Error>(())
 //! ```
 //!
-//! The version is a [`semver::Version`], which this crate re-exports.
+//! The returned version is a [`semver::Version`], re-exported by this crate.
+//!
+//! ## Versioning rules
+//!
+//! - **`HEAD` has a version tag:** use that tag's version.
+//! - **Highest reachable tag is a release:** `<major>.<minor>.<patch + 1>-0.<distance>[.<branch>]`.
+//! - **Highest reachable tag is a pre-release:** `<tag>.0.<distance>[.<branch>]`.
+//! - **No reachable version tags:** `0.1.0-0.<distance>[.<branch>]`.
+//!
+//! Any build metadata on a tag (such as `1.2.3+vendor`) is replaced with
+//! `+g<short_hash>` (plus `.dirty` when dirty checking is enabled and the
+//! working tree has uncommitted changes). Among reachable tags with equal
+//! precedence, Versolve picks the farthest commit so merging an equal-precedence
+//! tag cannot lower the version.
+//!
+//! Branch names are omitted on the configured
+//! [`default_branch`](Resolver::default_branch). Otherwise, characters outside
+//! `[0-9A-Za-z-]` (and invalid UTF-8) are replaced with `-`, and all-digit
+//! branch names are prefixed with `b`.
 //!
 //! # Build scripts
 //!
-//! To embed the version in a program, add Versolve to the build dependencies
-//! and use the [`build`] module in the build script:
+//! To embed the resolved version in a binary or library, add Versolve to
+//! `[build-dependencies]` and call [`build::Config::emit`] from `build.rs`:
 //!
 //! ```no_run
 //! fn main() {
@@ -37,29 +55,25 @@
 //! }
 //! ```
 //!
-//! The program can then read the version with `env!("MYAPP_VERSION")`.
+//! The package can then read the version with `env!("MYAPP_VERSION")`.
 //!
 //! # Requirements and features
 //!
-//! Versolve requires Rust 1.88 or later and a C compiler, as it builds libgit2
-//! from the bundled sources by default. It has two features, both on by
-//! default:
+//! Versolve requires Rust 1.88.0 or later. With default features it also
+//! requires a C compiler to build the bundled libgit2 sources.
 //!
-//! - `vendored-libgit2`: always build libgit2 from the bundled sources instead
-//!   of using a compatible libgit2 installed on the system.
-//! - `sha256`: support repositories that use SHA-256 object IDs. This builds
-//!   libgit2 with its experimental SHA-256 support.
-//!
-//! Cargo combines the features of a dependency across all packages, so these
-//! features also apply to every other package in the build that uses `git2`.
-//! See the
-//! [README](https://github.com/anttikivi/versolve#requirements-and-features)
-//! for the details.
+//! - `vendored-libgit2` *(enabled by default)*: build libgit2 from the sources
+//!   bundled with `libgit2-sys`. Disable default features to link against a
+//!   compatible system libgit2 when available.
+//! - `sha256` *(off by default)*: enable experimental SHA-256 repository
+//!   support in libgit2 (`git2/unstable-sha256`). Because Cargo unifies
+//!   features across dependencies, enabling this applies the experimental
+//!   SHA-256 libgit2 ABI to every package in the build that uses `git2`.
 //!
 //! # Logging
 //!
-//! Versolve logs debug messages about how it resolves the version, such as
-//! the tags it skips, with the [`log`](https://docs.rs/log) crate.
+//! Versolve logs debug details (such as skipped tags and raw libgit2 errors)
+//! through the [`log`](https://docs.rs/log) crate.
 
 #![warn(missing_docs)]
 // The build script examples show `fn main` to make clear where the code goes.

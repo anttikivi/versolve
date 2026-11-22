@@ -8,7 +8,7 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/anttikivi/versolve"
 keywords = ["git", "semver", "version", "versioning", "build"]
 categories = ["development-tools::build-utils", "command-line-utilities"]
-exclude = [".cargo", ".github", "renovate.json"]
+exclude = [".cargo", ".github", "deny.toml", "renovate.json"]
 
 [profile.release]
 strip = true
@@ -21,19 +21,19 @@ panic = "abort"
 members = [".", "xtask"]
 
 [features]
-default = ["sha256", "vendored-libgit2"]
+default = ["vendored-libgit2"]
 sha256 = ["git2/unstable-sha256"]
 vendored-libgit2 = ["git2/vendored-libgit2"]
 
 [dependencies]
 git2 = { version = "0.21.0", default-features = false }
-log = "0.4.35"
-semver = "1.0.28"
+log = "0.4"
+semver = "1.0.20"
 
 [build-dependencies]
 git2 = { version = "0.21.0", default-features = false }
-log = "0.4.35"
-semver = "1.0.28"
+log = "0.4"
+semver = "1.0.20"
 
 [dev-dependencies]
 tempfile = "=3.27.0"
