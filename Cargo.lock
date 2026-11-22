@@ -187,7 +187,7 @@ checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
 
 [[package]]
 name = "versolve"
-version = "0.3.0-dev"
+version = "0.3.0"
 dependencies = [
  "git2",
  "log",
@@ -212,4 +212,4 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.2.0"
+version = "0.3.0"
