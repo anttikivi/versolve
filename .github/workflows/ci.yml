@@ -41,11 +41,14 @@ jobs:
         shell: bash
         run: |
           output="$(./target/debug/versolve --verbose --version)"
-          embedded="${output%%$'\n'*}"
-          resolved="versolve $(./target/debug/versolve -T v -B master -b "${VERSOLVE_BUILD_BRANCH}")"
+          echo "${output}"
+          embedded="$(sed -n 's/^release: //p' <<< "${output}")"
+          resolved="$(./target/debug/versolve -T v -B master -b "${VERSOLVE_BUILD_BRANCH}")"
           echo "embedded: ${embedded}"
           echo "resolved: ${resolved}"
           test "${embedded}" = "${resolved}"
+          commit="$(sed -n 's/^commit-hash: //p' <<< "${output}")"
+          test "${commit}" = "$(git rev-parse HEAD)"
   e2e:
     name: e2e
     runs-on: ubuntu-latest

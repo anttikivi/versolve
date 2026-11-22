@@ -19,6 +19,21 @@
 //! If the package is not in a Git repository, for example when it is built from
 //! crates.io, or if the version can't be resolved, the version from
 //! `Cargo.toml` is used instead. See [`Config::emit`] for the details.
+//!
+//! When the version is resolved from the repository, the build script also sets
+//! variables for the hash and the date of the commit. For example, to print the
+//! version like `rustc --version` does:
+//!
+//! ```
+//! # macro_rules! env { ($var:literal) => { "1.2.3" } }
+//! let version = env!("MYAPP_VERSION");
+//! let commit = option_env!("MYAPP_VERSION_COMMIT_SHORT_HASH")
+//!     .zip(option_env!("MYAPP_VERSION_COMMIT_DATE"));
+//! match commit {
+//!     Some((hash, date)) => println!("myapp {version} ({hash} {date})"),
+//!     None => println!("myapp {version}"),
+//! }
+//! ```
 
 use std::{
     env,
@@ -28,7 +43,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use git2::Repository;
+use git2::{Commit, Repository};
 use semver::Version;
 
 use super::{
@@ -97,6 +112,17 @@ impl Config {
     /// metadata. The build script is run again when `HEAD`, the references, the
     /// Git configuration, or `Cargo.toml` changes.
     ///
+    /// If the version is resolved from the repository, the package can also
+    /// read the following variables with `option_env!`:
+    ///
+    /// - `<var>_COMMIT_HASH`: the full hash of the commit;
+    /// - `<var>_COMMIT_SHORT_HASH`: the abbreviated hash of the commit, as in
+    ///   the build metadata of the version; and
+    /// - `<var>_COMMIT_DATE`: the committer date of the commit as `YYYY-MM-DD`,
+    ///   in the committer's time zone like `git log --date=short` shows it.
+    ///
+    /// They are not set when the version from `Cargo.toml` is used.
+    ///
     /// The version from `Cargo.toml` is used silently if the package:
     ///
     /// - was packaged with `cargo package`, for example when it is downloaded
@@ -148,9 +174,9 @@ impl Config {
             None => Ok(None),
         };
 
-        let version = match self.resolve(&manifest_dir, branch, &mut out) {
-            Ok(Some(version)) => version,
-            Ok(None) => pkg_version,
+        let (version, commit) = match self.resolve(&manifest_dir, branch, &mut out) {
+            Ok(Some((version, commit))) => (version, Some(commit)),
+            Ok(None) => (pkg_version, None),
             Err(e) if self.strict => return Err(e),
             Err(e) => {
                 let hint = match &self.branch_env {
@@ -160,24 +186,32 @@ impl Config {
                     _ => String::new(),
                 };
                 out.print(format_args!("warning=failed to resolve version: {e}{hint}"));
-                pkg_version
+                (pkg_version, None)
             }
         };
 
         out.print(format_args!("rustc-env={var}={version}"));
+        if let Some(commit) = commit {
+            out.print(format_args!("rustc-env={var}_COMMIT_HASH={}", commit.hash));
+            out.print(format_args!(
+                "rustc-env={var}_COMMIT_SHORT_HASH={}",
+                commit.short_hash
+            ));
+            out.print(format_args!("rustc-env={var}_COMMIT_DATE={}", commit.date));
+        }
 
         Ok(version)
     }
 
-    /// Resolves the version of the repository that contains `manifest_dir`.
-    /// Returns `None` if the version from `Cargo.toml` should be used without
-    /// a warning.
+    /// Resolves the version of the repository that contains `manifest_dir` and
+    /// reads the information of the commit it is resolved for. Returns `None`
+    /// if the version from `Cargo.toml` should be used without a warning.
     fn resolve(
         &self,
         manifest_dir: &Path,
         branch: Result<Option<String>, Error>,
         out: &mut Instructions<'_>,
-    ) -> Result<Option<Version>, Error> {
+    ) -> Result<Option<(Version, CommitInfo)>, Error> {
         // `cargo package` always writes `Cargo.toml.orig`, but it writes
         // `.cargo_vcs_info.json` only if the package is in a Git repository.
         // Without these checks, a packaged crate in a Cargo home that is inside
@@ -210,8 +244,52 @@ impl Config {
             resolver = resolver.branch(name);
         }
 
-        resolver.resolve_repository(&repo).map(Some)
+        let version = resolver.resolve_repository(&repo)?;
+        let commit = CommitInfo::new(&repo.head()?.peel_to_commit()?)?;
+        Ok(Some((version, commit)))
     }
+}
+
+/// The information of the commit that the version is resolved for.
+struct CommitInfo {
+    hash: String,
+    short_hash: String,
+    date: String,
+}
+
+impl CommitInfo {
+    fn new(commit: &Commit<'_>) -> Result<Self, Error> {
+        let short_hash = commit.as_object().short_id()?;
+        let short_hash = short_hash.as_str()?;
+        let time = commit.time();
+        let (year, month, day) = civil_date(time.seconds() + i64::from(time.offset_minutes()) * 60);
+        Ok(Self {
+            hash: commit.id().to_string(),
+            short_hash: short_hash.to_owned(),
+            date: format!("{year:04}-{month:02}-{day:02}"),
+        })
+    }
+}
+
+/// Converts seconds since the Unix epoch to a date in the proleptic Gregorian
+/// calendar, using the algorithm from
+/// <https://howardhinnant.github.io/date_algorithms.html#civil_from_days>.
+fn civil_date(seconds: i64) -> (i64, i64, i64) {
+    let days = seconds.div_euclid(86_400) + 719_468;
+    let era = days.div_euclid(146_097);
+    let day_of_era = days.rem_euclid(146_097);
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_index = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * month_index + 2) / 5 + 1;
+    let month = if month_index < 10 {
+        month_index + 3
+    } else {
+        month_index - 9
+    };
+    let year = year_of_era + era * 400 + i64::from(month <= 2);
+    (year, month, day)
 }
 
 /// Writes Cargo instructions in the `cargo:` syntax.
@@ -293,6 +371,7 @@ fn print_rerun_instructions(repo: &Repository, out: &mut Instructions<'_>) {
 mod tests {
     use std::{fs, path::Path};
 
+    use git2::{Signature, Time};
     use tempfile::TempDir;
 
     use super::{
@@ -342,6 +421,7 @@ mod tests {
     #[track_caller]
     fn assert_fallback(result: Result<Version, Error>, output: &str) {
         assert_eq!(result.unwrap(), Version::new(9, 9, 9));
+        assert!(!output.contains("_COMMIT_"), "{output}");
         assert!(
             output.ends_with(&format!("cargo:rustc-env={VAR}=9.9.9\n")),
             "{output}"
@@ -393,6 +473,62 @@ mod tests {
         for path in [".git/HEAD", ".git/refs", ".git/config"] {
             let path = canonical(repo.path().join(path));
             assert!(paths.contains(&path), "{path:?} not in {output}");
+        }
+    }
+
+    /// Commits to the current branch with `time` as the author and committer
+    /// time.
+    fn commit_with_time(repo: &TestRepo, time: Time) {
+        let git = Repository::open(repo.path()).unwrap();
+        let tree_oid = git.treebuilder(None).unwrap().write().unwrap();
+        let tree = git.find_tree(tree_oid).unwrap();
+        let sig = Signature::new("Test", "test@example.com", &time).unwrap();
+        let parent = git.head().ok().map(|head| head.peel_to_commit().unwrap());
+        let parents: Vec<&Commit> = parent.iter().collect();
+        git.commit(Some("HEAD"), &sig, &sig, "commit", &tree, &parents)
+            .unwrap();
+    }
+
+    #[test]
+    fn commit_information() {
+        // 2025-01-01T00:00:00Z with the committer's time zone offset in
+        // minutes.
+        for (offset, date) in [
+            (0, "2025-01-01"),
+            (-60, "2024-12-31"),
+            (14 * 60, "2025-01-01"),
+        ] {
+            let repo = TestRepo::new();
+            commit_with_time(&repo, Time::new(1_735_689_600, offset));
+            let short_id = repo.short_head_id();
+
+            let (result, output) = emit(&config(), repo.path(), &[]);
+            assert_eq!(result.unwrap().build.as_str(), format!("g{short_id}"));
+            assert!(
+                output.ends_with(&format!(
+                    "cargo:rustc-env={VAR}_COMMIT_HASH={}\n\
+                    cargo:rustc-env={VAR}_COMMIT_SHORT_HASH={short_id}\n\
+                    cargo:rustc-env={VAR}_COMMIT_DATE={date}\n",
+                    repo.head_id()
+                )),
+                "{offset}: {output}"
+            );
+        }
+    }
+
+    #[test]
+    fn civil_dates() {
+        for (seconds, date) in [
+            (0, (1970, 1, 1)),
+            (-1, (1969, 12, 31)),
+            (951_782_400, (2000, 2, 29)),
+            (1_735_689_599, (2024, 12, 31)),
+            (4_107_542_400, (2100, 3, 1)),
+            (-11_670_998_400, (1600, 2, 29)),
+            (-62_135_596_800, (1, 1, 1)),
+            (253_402_300_799, (9999, 12, 31)),
+        ] {
+            assert_eq!(civil_date(seconds), date, "{seconds}");
         }
     }
 

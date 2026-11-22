@@ -45,11 +45,6 @@ fn run(args: args::Args) -> Result<(), Box<dyn std::error::Error>> {
     let version = Version::parse(env!("VERSOLVE_VERSION")).unwrap_or_else(|e| {
         panic!("failed to parse the embedded Versolve version, Versolve must be built with a valid version: {e}")
     });
-    let stripped_version = Version {
-        build: BuildMetadata::EMPTY,
-        ..version.clone()
-    };
-
     init_logger(args.verbose.unwrap_or(false));
 
     log::debug!("running versolve {version}");
@@ -61,11 +56,33 @@ fn run(args: args::Args) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if args.version.unwrap_or(false) {
-        if args.verbose.unwrap_or(false) {
-            print_line(format_args!("versolve {version}"))?;
-        } else {
-            print_line(format_args!("versolve {stripped_version}"))?;
+        let commit_hash = option_env!("VERSOLVE_VERSION_COMMIT_HASH");
+        let commit_short_hash = option_env!("VERSOLVE_VERSION_COMMIT_SHORT_HASH");
+        let commit_date = option_env!("VERSOLVE_VERSION_COMMIT_DATE");
+        let release = Version {
+            build: BuildMetadata::EMPTY,
+            ..version.clone()
+        };
+
+        match commit_short_hash.zip(commit_date) {
+            Some((hash, date)) => print_line(format_args!("versolve {release} ({hash} {date})"))?,
+            None => print_line(format_args!("versolve {release}"))?,
         }
+
+        if args.verbose.unwrap_or(false) {
+            print_line("binary: versolve")?;
+            print_line(format_args!(
+                "commit-hash: {}",
+                commit_hash.unwrap_or("unknown")
+            ))?;
+            print_line(format_args!(
+                "commit-date: {}",
+                commit_date.unwrap_or("unknown")
+            ))?;
+            print_line(format_args!("host: {}", env!("VERSOLVE_HOST")))?;
+            print_line(format_args!("release: {version}"))?;
+        }
+
         return Ok(());
     }
 

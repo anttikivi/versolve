@@ -15,7 +15,12 @@ and this project adheres to
   re-exported.
 - The library logs debug messages with the `log` crate.
 - The `versolve::build` module for embedding the resolved version in a package
-  from its build script.
+  from its build script. When the version is resolved from the repository, it
+  also sets `<VAR>_COMMIT_HASH`, `<VAR>_COMMIT_SHORT_HASH`, and
+  `<VAR>_COMMIT_DATE`, so that the package can print its version like
+  `rustc --version` does.
+- `--verbose --version` prints the full version, commit hash, commit date, and
+  host in the format of `rustc -vV`.
 - The `sha256` and `vendored-libgit2` features, both on by default, so that
   SHA-256 support and the bundled libgit2 can be left out. With the default
   features, libgit2 is still always built from the bundled sources.
@@ -25,7 +30,11 @@ and this project adheres to
 - Versolve is now licensed under either of the MIT license or the Apache
   License, Version 2.0, at your option. Earlier releases remain under the GNU
   General Public License v3.0 or later.
-- Print the build metadata with `--version` only when verbose output is enabled.
+- `--version` prints the version in the format of `rustc --version`, for example
+  `versolve 0.3.0 (1a2b3c4 2026-11-21)`. The build metadata is left out of the
+  version, and the abbreviated hash and the date of the commit follow it in
+  parentheses. The commit is omitted when Versolve is built from a packaged
+  crate.
 - When building from source, the build script also finds the repository from the
   parent directories, but leaves out packaged crates and directories that the
   repository ignores.

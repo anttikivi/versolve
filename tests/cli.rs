@@ -5,6 +5,7 @@ use std::{
 };
 
 use tempfile::TempDir;
+use versolve::semver::{BuildMetadata, Version};
 
 fn versolve(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_versolve"))
@@ -62,6 +63,85 @@ fn help_is_shown_despite_invalid_arguments() {
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert_eq!(output.status.code(), Some(0), "{args:?}");
         assert!(stdout.contains("Usage: versolve"), "{args:?}: {stdout}");
+    }
+}
+
+/// Runs Versolve with `args` and returns its standard output, checking that it
+/// succeeds.
+fn versolve_stdout(args: &[&str]) -> String {
+    let output = versolve(args);
+    assert!(
+        output.status.success(),
+        "{args:?}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).unwrap()
+}
+
+#[test]
+fn version_has_rustc_format() {
+    let stdout = versolve_stdout(&["--version"]);
+    let first_line = stdout
+        .strip_suffix('\n')
+        .filter(|s| !s.contains('\n'))
+        .unwrap_or_else(|| panic!("expected one line: {stdout:?}"));
+    let rest = first_line.strip_prefix("versolve ").unwrap();
+    let (release, commit) = match rest.split_once(" (") {
+        Some((release, commit)) => {
+            let (hash, date) = commit
+                .strip_suffix(')')
+                .and_then(|c| c.split_once(' '))
+                .unwrap_or_else(|| panic!("invalid commit information: {first_line:?}"));
+            (release, Some((hash, date)))
+        }
+        None => (rest, None),
+    };
+    let release = Version::parse(release).unwrap();
+    assert!(release.build.is_empty(), "{first_line:?}");
+
+    let stdout = versolve_stdout(&["--verbose", "--version"]);
+    let mut lines = stdout.lines();
+    assert_eq!(lines.next(), Some(first_line));
+    let fields: Vec<(&str, &str)> = lines
+        .map(|l| l.split_once(": ").unwrap_or_else(|| panic!("{l:?}")))
+        .collect();
+    let keys: Vec<&str> = fields.iter().map(|(k, _)| *k).collect();
+    assert_eq!(
+        keys,
+        ["binary", "commit-hash", "commit-date", "host", "release"]
+    );
+    let field = |key| fields.iter().find(|(k, _)| *k == key).unwrap().1;
+
+    assert_eq!(field("binary"), "versolve");
+    let full = Version::parse(field("release")).unwrap();
+    assert_eq!(
+        Version {
+            build: BuildMetadata::EMPTY,
+            ..full.clone()
+        },
+        release
+    );
+    match commit {
+        Some((hash, date)) => {
+            assert!(field("commit-hash").starts_with(hash), "{stdout}");
+            assert_eq!(field("commit-date"), date);
+            assert_eq!(full.build.as_str(), format!("g{hash}"));
+            let date = date.as_bytes();
+            assert!(
+                date.len() == 10
+                    && date[4] == b'-'
+                    && date[7] == b'-'
+                    && date
+                        .iter()
+                        .enumerate()
+                        .all(|(i, b)| i == 4 || i == 7 || b.is_ascii_digit()),
+                "{stdout}"
+            );
+        }
+        None => {
+            assert_eq!(field("commit-hash"), "unknown");
+            assert_eq!(field("commit-date"), "unknown");
+        }
     }
 }
 
