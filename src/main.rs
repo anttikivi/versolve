@@ -47,9 +47,6 @@ fn run(args: args::Args) -> Result<(), Box<dyn std::error::Error>> {
     });
     init_logger(args.verbose.unwrap_or(false));
 
-    log::debug!("running versolve {version}");
-    log::debug!("command-line arguments parsed: {args:?}");
-
     if args.help.unwrap_or(false) {
         print_line(args::USAGE)?;
         return Ok(());
@@ -85,6 +82,9 @@ fn run(args: args::Args) -> Result<(), Box<dyn std::error::Error>> {
 
         return Ok(());
     }
+
+    log::debug!("running versolve {version}");
+    log::debug!("command-line arguments parsed: {args:?}");
 
     let resolver = resolver(args)?;
 
