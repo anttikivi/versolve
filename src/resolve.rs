@@ -103,7 +103,7 @@ impl Resolver {
         if self.branch.as_deref() == Some("") {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
-                "branch name cannot be an empty string",
+                "branch name cannot be empty",
             ));
         }
 
