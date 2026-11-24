@@ -50,8 +50,12 @@ jobs:
           echo "embedded: ${embedded}"
           echo "resolved: ${resolved}"
           test "${embedded}" = "${resolved}"
-          commit="$(sed -n 's/^commit-hash: //p' <<< "${output}")"
-          test "${commit}" = "$(git rev-parse HEAD)"
+          test "$(./target/debug/versolve --version)" = "versolve ${resolved}"
+          hash="${embedded##*+g}"
+          commit="$(git rev-parse HEAD)"
+          echo "embedded hash: ${hash}"
+          test "${#hash}" -ge 7
+          test "${commit#"${hash}"}" != "${commit}"
   e2e:
     name: e2e
     runs-on: ubuntu-latest
