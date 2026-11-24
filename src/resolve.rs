@@ -6,9 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use git2::{
-    Config, ErrorClass, ErrorCode, ObjectType, Oid, Reference, Repository, StatusOptions, Time,
-};
+use git2::{Config, ErrorClass, ErrorCode, ObjectType, Oid, Reference, Repository, StatusOptions};
 use semver::{BuildMetadata, Prerelease, Version};
 
 use super::error::{Error, ErrorKind};
@@ -96,10 +94,10 @@ impl Resolver {
     /// or if the version cannot be resolved. See [`ErrorKind`] for details.
     pub fn resolve(&self) -> Result<Version, Error> {
         let repo = open_repository(&self.repository)?;
-        self.resolve_repository(&repo).map(|r| r.version)
+        self.resolve_repository(&repo)
     }
 
-    pub(crate) fn resolve_repository(&self, repo: &Repository) -> Result<Resolved, Error> {
+    pub(crate) fn resolve_repository(&self, repo: &Repository) -> Result<Version, Error> {
         if self.branch.as_deref() == Some("") {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
@@ -113,7 +111,6 @@ impl Resolver {
         let head_ref = head_reference(repo)?;
         let head_commit = head_ref.peel_to_commit()?;
         let head_oid = head_commit.id();
-        let commit_time = head_commit.time();
 
         let (base, distance) = find_base_and_distance(repo, head_oid, tags)?;
         let mut version = base_version(base, distance)?;
@@ -134,12 +131,7 @@ impl Resolver {
         };
         version.build = BuildMetadata::new(&build).expect("constructed build metadata is valid");
 
-        Ok(Resolved {
-            version,
-            commit_id: head_oid,
-            short_id,
-            commit_time,
-        })
+        Ok(version)
     }
 
     fn format_prerelease(
@@ -178,13 +170,6 @@ impl Resolver {
         }
         Ok(Prerelease::new(&pre).expect("constructed prerelease identifier is valid"))
     }
-}
-
-pub(crate) struct Resolved {
-    pub(crate) version: Version,
-    pub(crate) commit_id: Oid,
-    pub(crate) short_id: String,
-    pub(crate) commit_time: Time,
 }
 
 pub(crate) fn open_repository(path: &Path) -> Result<Repository, Error> {

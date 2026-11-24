@@ -99,12 +99,13 @@ fn e2e() -> Result {
     fs::write(
         repo.join("app/build.rs"),
         r#"fn main() {
-    versolve::build::Config::new()
+    let version = versolve::build::Config::new()
         .tag_prefix("v")
         .default_branch("main")
         .branch_env("APP_BUILD_BRANCH")
-        .emit("APP_VERSION")
+        .resolve()
         .unwrap();
+    println!("cargo:rustc-env=APP_VERSION={version}");
 }
 "#,
     )?;

@@ -42,16 +42,18 @@
 //! # Build scripts
 //!
 //! To embed the resolved version in a binary or library, add Versolve to
-//! `[build-dependencies]` and call [`build::Config::emit`] from `build.rs`:
+//! `[build-dependencies]`, call [`build::Config::resolve`] from `build.rs`, and
+//! pass the version to the package yourself:
 //!
 //! ```no_run
 //! fn main() {
-//!     versolve::build::Config::new()
+//!     let version = versolve::build::Config::new()
 //!         .tag_prefix("v")
 //!         .default_branch("main")
 //!         .branch_env("MYAPP_BUILD_BRANCH")
-//!         .emit("MYAPP_VERSION")
-//!         .unwrap();
+//!         .resolve()
+//!         .expect("failed to resolve the version");
+//!     println!("cargo:rustc-env=MYAPP_VERSION={version}");
 //! }
 //! ```
 //!
