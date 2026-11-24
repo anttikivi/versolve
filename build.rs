@@ -7,7 +7,7 @@ use std::env;
 fn main() {
     let target = env::var("TARGET").expect("TARGET is not set");
     println!("cargo:rustc-env=VERSOLVE_HOST={target}");
-    let version = versolve::build::Config::new()
+    let version = versolve::cargo::Resolver::new()
         .tag_prefix("v")
         .default_branch("master")
         .branch_env("VERSOLVE_BUILD_BRANCH")

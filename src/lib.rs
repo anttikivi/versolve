@@ -42,12 +42,12 @@
 //! # Build scripts
 //!
 //! To embed the resolved version in a binary or library, add Versolve to
-//! `[build-dependencies]`, call [`build::Config::resolve`] from `build.rs`, and
-//! pass the version to the package yourself:
+//! `[build-dependencies]`, call [`cargo::Resolver::resolve`] from `build.rs`,
+//! and pass the version to the package yourself:
 //!
 //! ```no_run
 //! fn main() {
-//!     let version = versolve::build::Config::new()
+//!     let version = versolve::cargo::Resolver::new()
 //!         .tag_prefix("v")
 //!         .default_branch("main")
 //!         .branch_env("MYAPP_BUILD_BRANCH")
@@ -81,7 +81,7 @@
 // The build script examples show `fn main` to make clear where the code goes.
 #![allow(clippy::needless_doctest_main)]
 
-pub mod build;
+pub mod cargo;
 mod error;
 mod resolve;
 #[cfg(test)]

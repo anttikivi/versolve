@@ -1,12 +1,18 @@
-//! Resolve a package's version from its build script.
+//! Resolve a package's version from its Cargo build script.
 //!
-//! Add Versolve to `[build-dependencies]`, call [`Config::resolve`] in
+//! Unlike [`versolve::Resolver`](crate::Resolver), which resolves any
+//! repository path, [`Resolver`] finds the package through Cargo's build script
+//! environment, falls back to the `Cargo.toml` version when needed, and prints
+//! Cargo instructions so that the build script reruns when the version may
+//! change.
+//!
+//! Add Versolve to `[build-dependencies]`, call [`Resolver::resolve`] in
 //! `build.rs`, and pass the returned version to the package however you like,
 //! for example as an environment variable:
 //!
 //! ```no_run
 //! fn main() {
-//!     let version = versolve::build::Config::new()
+//!     let version = versolve::cargo::Resolver::new()
 //!         .tag_prefix("v")
 //!         .default_branch("main")
 //!         .branch_env("MYAPP_BUILD_BRANCH")
@@ -20,7 +26,7 @@
 //!
 //! When the package is outside a Git repository (such as a crates.io tarball)
 //! or version resolution fails, the version from `Cargo.toml` is used instead.
-//! See [`Config::resolve`] for details.
+//! See [`Resolver::resolve`] for details.
 
 use std::{
     env,
@@ -35,35 +41,40 @@ use semver::Version;
 
 use super::{
     error::{Error, ErrorKind},
-    resolve::{self, Resolver},
+    resolve,
 };
 
-/// Configures how [`Config::resolve`] resolves a package version.
+/// Resolves the version of a package from its Cargo build script.
 ///
-/// See the [module documentation](self) for an example.
+/// Configure it with the builder methods and call [`Resolver::resolve`]. See
+/// the [module documentation](self) for an example.
 #[derive(Clone, Debug, Default)]
-pub struct Config {
+pub struct Resolver {
     tag_prefix: String,
     default_branch: Option<String>,
     branch_env: Option<String>,
     strict: bool,
 }
 
-impl Config {
-    /// Creates a configuration with default settings.
+impl Resolver {
+    /// Creates a resolver with default settings.
+    ///
+    /// Unlike [`versolve::Resolver::new`](crate::Resolver::new), this takes no
+    /// path: the package directory comes from `CARGO_MANIFEST_DIR` when
+    /// [`resolve`](Resolver::resolve) is called.
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Considers only tags starting with `prefix` (e.g. `v`). Empty by default.
-    /// See [`Resolver::tag_prefix`].
+    /// See [`versolve::Resolver::tag_prefix`](crate::Resolver::tag_prefix).
     pub fn tag_prefix(mut self, prefix: impl Into<String>) -> Self {
         self.tag_prefix = prefix.into();
         self
     }
 
-    /// Omits the branch name from versions resolved on `name`.
-    /// See [`Resolver::default_branch`].
+    /// Omits the branch name from versions resolved on `name`. See
+    /// [`versolve::Resolver::default_branch`](crate::Resolver::default_branch).
     pub fn default_branch(mut self, name: impl Into<String>) -> Self {
         self.default_branch = Some(name.into());
         self
@@ -97,11 +108,12 @@ impl Config {
     /// discovered from there. Resolution inspects only committed repository
     /// state, so `.dirty` is never appended.
     ///
-    /// Unlike [`Resolver::resolve`], this has build-script side effects: it
-    /// prints Cargo instructions to stdout so that Cargo reruns the build
-    /// script when the version may change, and a `cargo:warning` when it falls
-    /// back. It doesn't pass the version to the package; print your own
-    /// instruction for that, such as `cargo:rustc-env=MYAPP_VERSION={version}`.
+    /// Unlike [`versolve::Resolver::resolve`](crate::Resolver::resolve), this
+    /// has build-script side effects: it prints Cargo instructions to stdout so
+    /// that Cargo reruns the build script when the version may change, and a
+    /// `cargo:warning` when it falls back. It doesn't pass the version to the
+    /// package; print your own instruction for that, such as
+    /// `cargo:rustc-env=MYAPP_VERSION={version}`.
     ///
     /// # Fallback behavior
     ///
@@ -117,14 +129,14 @@ impl Config {
     /// If the package is in a repository but resolution fails (e.g. a shallow
     /// clone or detached `HEAD` without a tag or branch override), `resolve`
     /// prints a `cargo:warning` and falls back to `CARGO_PKG_VERSION`, unless
-    /// [strict mode](Config::strict) is enabled.
+    /// [strict mode](Resolver::strict) is enabled.
     ///
     /// # Build script reruns
     ///
     /// When resolving from a Git repository, `resolve` prints
     /// `rerun-if-changed` for `HEAD`, refs, Git configuration, `shallow` (if
     /// present), and `Cargo.toml`, plus `rerun-if-env-changed` for the
-    /// configured [`branch_env`](Config::branch_env).
+    /// configured [`branch_env`](Resolver::branch_env).
     ///
     /// Printing any `rerun-if-*` instruction disables Cargo's default behavior
     /// of rerunning `build.rs` whenever any package file changes. If your build
@@ -138,8 +150,8 @@ impl Config {
     ///
     /// # Errors
     ///
-    /// Returns an error only in [strict mode](Config::strict), when the package
-    /// is in a Git repository and version resolution fails.
+    /// Returns an error only in [strict mode](Resolver::strict), when the
+    /// package is in a Git repository and version resolution fails.
     ///
     /// # Panics
     ///
@@ -221,7 +233,7 @@ impl Config {
             None => None,
         };
 
-        let mut resolver = Resolver::new(manifest_dir)
+        let mut resolver = resolve::Resolver::new(manifest_dir)
             .tag_prefix(self.tag_prefix.clone())
             .check_dirty(false);
         if let Some(name) = &self.default_branch {
@@ -250,7 +262,7 @@ impl Instructions<'_> {
 fn cargo_env(env: &dyn Fn(&str) -> Option<OsString>, name: &str) -> OsString {
     env(name).unwrap_or_else(|| {
         panic!(
-            "{name} is not set; versolve::build::Config::resolve must be called from a Cargo \
+            "{name} is not set; versolve::cargo::Resolver::resolve must be called from a Cargo \
             build script"
         )
     })
@@ -322,15 +334,15 @@ mod tests {
 
     const BRANCH_VAR: &str = "TEST_BRANCH";
 
-    fn config() -> Config {
-        Config::new()
+    fn resolver() -> Resolver {
+        Resolver::new()
             .tag_prefix("v")
             .default_branch("main")
             .branch_env(BRANCH_VAR)
     }
 
     fn resolve(
-        config: &Config,
+        resolver: &Resolver,
         dir: &Path,
         vars: &[(&str, OsString)],
     ) -> (Result<Version, Error>, String) {
@@ -344,7 +356,7 @@ mod tests {
                 .map(|(_, v)| v.clone()),
         };
         let mut out = Vec::new();
-        let result = config.resolve_with(&mut out, &env);
+        let result = resolver.resolve_with(&mut out, &env);
         let output = String::from_utf8(out).unwrap();
         for line in output.lines() {
             assert!(
@@ -388,7 +400,7 @@ mod tests {
     fn repository_at_package_root() {
         let repo = tagged_repo();
 
-        let (result, output) = resolve(&config(), repo.path(), &[]);
+        let (result, output) = resolve(&resolver(), repo.path(), &[]);
         let expected = format!("1.2.4-0.1+g{}", repo.short_head_id());
         assert_eq!(result.unwrap().to_string(), expected);
         assert!(
@@ -412,11 +424,11 @@ mod tests {
         let repo = tagged_repo();
         let packed_refs = repo.path().join(".git/packed-refs");
 
-        let (_, output) = resolve(&config(), repo.path(), &[]);
+        let (_, output) = resolve(&resolver(), repo.path(), &[]);
         assert!(!output.contains("packed-refs"), "{output}");
 
         repo.git(&["pack-refs", "--all"]);
-        let (_, output) = resolve(&config(), repo.path(), &[]);
+        let (_, output) = resolve(&resolver(), repo.path(), &[]);
         assert!(
             rerun_paths(&output).contains(&canonical(packed_refs)),
             "{output}"
@@ -426,7 +438,7 @@ mod tests {
     #[test]
     fn shallow_marker_only_if_it_exists() {
         let repo = tagged_repo();
-        let (_, output) = resolve(&config(), repo.path(), &[]);
+        let (_, output) = resolve(&resolver(), repo.path(), &[]);
         assert!(!output.contains("shallow"), "{output}");
 
         let clone = TempDir::new().unwrap();
@@ -438,7 +450,7 @@ mod tests {
             clone.path().to_str().unwrap(),
         ]);
         let shallow = canonical(clone.path().join(".git/shallow"));
-        let (result, output) = resolve(&config(), clone.path(), &[]);
+        let (result, output) = resolve(&resolver(), clone.path(), &[]);
         assert_fallback(result);
         assert!(rerun_paths(&output).contains(&shallow), "{output}");
     }
@@ -449,7 +461,7 @@ mod tests {
         let package = repo.path().join("crates/app");
         fs::create_dir_all(&package).unwrap();
 
-        let (result, output) = resolve(&config(), &package, &[]);
+        let (result, output) = resolve(&resolver(), &package, &[]);
         assert_eq!(
             result.unwrap().to_string(),
             format!("1.2.4-0.1+g{}", repo.short_head_id())
@@ -478,7 +490,7 @@ mod tests {
                 format!("1.2.4-0.1.other+g{short_id}"),
             ),
         ] {
-            let (result, output) = resolve(&config(), repo.path(), &vars);
+            let (result, output) = resolve(&resolver(), repo.path(), &vars);
             assert_eq!(result.unwrap().to_string(), expected, "{vars:?}");
             assert!(!output.contains("cargo:warning="), "{vars:?}: {output}");
         }
@@ -497,7 +509,7 @@ mod tests {
             worktree.to_str().unwrap(),
         ]);
 
-        let (result, output) = resolve(&config(), &worktree, &[]);
+        let (result, output) = resolve(&resolver(), &worktree, &[]);
         assert_eq!(
             result.unwrap().to_string(),
             format!("1.2.4-0.1.feature+g{}", repo.short_head_id())
@@ -517,7 +529,7 @@ mod tests {
             let repo = tagged_repo();
             repo.write_file(marker, "\n");
 
-            let (result, output) = resolve(&config(), repo.path(), &[]);
+            let (result, output) = resolve(&resolver(), repo.path(), &[]);
             assert_fallback(result);
             assert_eq!(
                 output,
@@ -531,7 +543,7 @@ mod tests {
     fn no_repository_falls_back() {
         let dir = TempDir::new().unwrap();
 
-        let (result, output) = resolve(&config(), dir.path(), &[]);
+        let (result, output) = resolve(&resolver(), dir.path(), &[]);
         assert_fallback(result);
         assert_eq!(output, "");
     }
@@ -545,7 +557,7 @@ mod tests {
         for dir in ["vendor/app", "target", "crates/target/app"] {
             let package = repo.path().join(dir);
             fs::create_dir_all(&package).unwrap();
-            let (result, output) = resolve(&config(), &package, &[]);
+            let (result, output) = resolve(&resolver(), &package, &[]);
             assert_fallback(result);
             assert_eq!(output, "", "{dir}");
         }
@@ -562,7 +574,7 @@ mod tests {
         );
 
         for vars in [vec![], vec![(BRANCH_VAR, OsString::new())]] {
-            let (result, output) = resolve(&config(), repo.path(), &vars);
+            let (result, output) = resolve(&resolver(), repo.path(), &vars);
             assert_fallback(result);
             assert!(
                 output.contains(&format!("{warning}; set {BRANCH_VAR} to name the branch\n")),
@@ -571,11 +583,11 @@ mod tests {
             assert!(rerun_paths(&output).len() > 1, "{vars:?}: {output}");
         }
 
-        let (result, output) = resolve(&Config::new(), repo.path(), &[]);
+        let (result, output) = resolve(&Resolver::new(), repo.path(), &[]);
         assert_fallback(result);
         assert!(output.contains(&format!("{warning}\n")), "{output}");
 
-        let (result, output) = resolve(&config(), repo.path(), &[(BRANCH_VAR, "main".into())]);
+        let (result, output) = resolve(&resolver(), repo.path(), &[(BRANCH_VAR, "main".into())]);
         assert_eq!(
             result.unwrap().to_string(),
             format!("0.1.0-0.1+g{}", repo.short_head_id())
@@ -586,7 +598,7 @@ mod tests {
     #[test]
     fn strict_mode() {
         let repo = tagged_repo();
-        let strict = config().strict(true);
+        let strict = resolver().strict(true);
 
         let clone = TempDir::new().unwrap();
         repo.git(&[
@@ -619,7 +631,7 @@ mod tests {
         let repo = tagged_repo();
         let vars = [(BRANCH_VAR, OsString::from_vec(b"fo\xff".to_vec()))];
 
-        let (result, output) = resolve(&config(), repo.path(), &vars);
+        let (result, output) = resolve(&resolver(), repo.path(), &vars);
         assert_fallback(result);
         assert!(
             output.contains(&format!(
@@ -629,7 +641,7 @@ mod tests {
             "{output}"
         );
 
-        let strict = config().strict(true);
+        let strict = resolver().strict(true);
         let (result, _) = resolve(&strict, repo.path(), &vars);
         assert_eq!(result.unwrap_err().kind(), ErrorKind::InvalidInput);
 

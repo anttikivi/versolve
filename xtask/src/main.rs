@@ -65,7 +65,7 @@ fn sh(prog: &str, args: &[&str]) -> Result {
     Ok(())
 }
 
-/// Builds a package that uses `versolve::build` from its build script in a
+/// Builds a package that uses `versolve::cargo` from its build script in a
 /// temporary repository, and checks the version it embeds.
 fn e2e() -> Result {
     let root = root();
@@ -99,7 +99,7 @@ fn e2e() -> Result {
     fs::write(
         repo.join("app/build.rs"),
         r#"fn main() {
-    let version = versolve::build::Config::new()
+    let version = versolve::cargo::Resolver::new()
         .tag_prefix("v")
         .default_branch("main")
         .branch_env("APP_BUILD_BRANCH")
