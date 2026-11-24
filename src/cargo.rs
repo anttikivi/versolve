@@ -134,19 +134,31 @@ impl Resolver {
     /// # Build script reruns
     ///
     /// When resolving from a Git repository, `resolve` prints
-    /// `rerun-if-changed` for `HEAD`, refs, Git configuration, `shallow` (if
-    /// present), and `Cargo.toml`, plus `rerun-if-env-changed` for the
-    /// configured [`branch_env`](Resolver::branch_env).
+    /// `rerun-if-changed` for `HEAD`, the `refs` directory, `packed-refs` and
+    /// `shallow` (if present), Git configuration, and `Cargo.toml`, plus
+    /// `rerun-if-env-changed` for the configured
+    /// [`branch_env`](Resolver::branch_env). Changes to the working tree don't
+    /// rerun the build script, since they don't affect the version.
     ///
     /// Printing any `rerun-if-*` instruction disables Cargo's default behavior
     /// of rerunning `build.rs` whenever any package file changes. If your build
     /// script reads other files or variables, emit rerun instructions for them
     /// as well.
     ///
-    /// If the repository can't be opened (for example because it uses the
-    /// reftable format), no Git paths are watched, so fixing the repository
-    /// doesn't rerun the build script by itself. The fallback version stays
-    /// until a package file changes or you run `cargo clean`.
+    /// Some changes don't rerun the build script by themselves, so the
+    /// previous version stays until a package file changes or you run
+    /// `cargo clean`:
+    ///
+    /// - When the package is outside a repository, in an ignored directory, or
+    ///   in a repository that can't be opened (for example because it uses the
+    ///   reftable format), no Git paths are watched. Creating the repository,
+    ///   un-ignoring the directory, or fixing the repository goes unnoticed.
+    /// - `packed-refs` and `shallow` are watched only if they exist, because
+    ///   Cargo reruns a build script on every build while a watched path is
+    ///   missing. Git normally changes `refs` too when it creates them (for
+    ///   example with `git pack-refs --all`, `git gc`, or a shallow fetch), but
+    ///   if a tool creates one without changing `refs`, later changes to that
+    ///   file go unnoticed until another watched path changes.
     ///
     /// # Errors
     ///
