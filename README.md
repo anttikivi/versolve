@@ -45,7 +45,7 @@ Add Versolve to `[dependencies]` to resolve versions directly from Rust code:
 
 ```toml
 [dependencies]
-versolve = "0.3"
+versolve = "0.4"
 ```
 
 ```rust
@@ -63,45 +63,43 @@ by `versolve`). Debug diagnostics are emitted via the
 ### Build script integration
 
 To embed the resolved version in your program at compile time, add Versolve to
-`[build-dependencies]` and call `versolve::build::Config::emit` in `build.rs`:
+`[build-dependencies]`, resolve the version with `versolve::cargo::Resolver` in
+`build.rs`, and pass it to your package:
 
 ```toml
 [build-dependencies]
-versolve = "0.3"
+versolve = "0.4"
 ```
 
 ```rust
 fn main() {
-    versolve::build::Config::new()
+    let version = versolve::cargo::Resolver::new()
         .tag_prefix("v")
         .default_branch("main")
         .branch_env("MYAPP_BUILD_BRANCH")
-        .emit("MYAPP_VERSION")
-        .unwrap();
+        .resolve()
+        .expect("failed to resolve the version");
+    println!("cargo:rustc-env=MYAPP_VERSION={version}");
 }
 ```
 
-Read the version with `env!("MYAPP_VERSION")`. When resolved from Git, `emit`
-also sets `MYAPP_VERSION_COMMIT_HASH`, `MYAPP_VERSION_COMMIT_SHORT_HASH`, and
-`MYAPP_VERSION_COMMIT_DATE` (committer date in UTC as `YYYY-MM-DD`; pass
-`.time_zone(versolve::build::TimeZone::Committer)` for the committer's time
-zone). Read those with `option_env!`, since they are omitted when falling back
-to `Cargo.toml`:
+Then read the version in your code:
 
 ```rust
-// Strip build metadata because the short hash is printed separately.
-let version = env!("MYAPP_VERSION").split('+').next().unwrap();
-let commit = option_env!("MYAPP_VERSION_COMMIT_SHORT_HASH")
-    .zip(option_env!("MYAPP_VERSION_COMMIT_DATE"));
-match commit {
-    Some((hash, date)) => println!("myapp {version} ({hash} {date})"),
-    None => println!("myapp {version}"),
-}
+const VERSION: &str = env!("MYAPP_VERSION");
 ```
 
-`emit` resolves only committed repository state (never `.dirty`) and prints
+The resolved version is the version of your application as derived from Git.
+Versolve doesn't change `Cargo.toml`, so `CARGO_PKG_VERSION`, dependency
+resolution, and the version you publish to a registry still come from
+`Cargo.toml`.
+
+`resolve` uses only committed repository state (never `.dirty`). Unlike
+`versolve::Resolver::resolve`, it has build script side effects: it prints
 `cargo:rerun-if-changed` / `cargo:rerun-if-env-changed` instructions for `HEAD`,
-refs, Git config, `shallow`, `Cargo.toml`, and the branch variable.
+refs, Git config, `shallow`, `Cargo.toml`, and the branch variable, and a
+`cargo:warning` when it falls back. It doesn't set any environment variables for
+your package; that's up to your build script.
 
 > [!IMPORTANT]
 > Printing any `rerun-if-*` instruction turns off Cargo's default of rerunning
@@ -111,17 +109,48 @@ refs, Git config, `shallow`, `Cargo.toml`, and the branch variable.
 
 #### Fallback and strict mode
 
-`emit` silently falls back to `CARGO_PKG_VERSION` when the package was packaged
-with `cargo package` (crates.io downloads, `cargo vendor`, verification builds),
-is outside a Git repository, or sits inside an ignored directory.
+`resolve` silently falls back to `CARGO_PKG_VERSION` when the package was
+packaged with `cargo package` (crates.io downloads, `cargo vendor`, verification
+builds), is outside a Git repository, or sits inside an ignored directory.
 
 If a repository is found but resolution fails (such as a shallow clone or a
 detached `HEAD` during CI, `git rebase`, or `git bisect` without `branch_env`
-set), `emit` prints a `cargo:warning` and falls back to `Cargo.toml`. Call
-`.strict(true)` to fail the build instead — useful for release builds in CI. See
-the
-[`versolve::build` API docs](https://docs.rs/versolve/latest/versolve/build/)
+set), `resolve` prints a `cargo:warning` and falls back to `Cargo.toml`. Call
+`.strict(true)` to fail the build instead — useful for release builds in CI.
+Packages outside a repository still fall back in strict mode.
+
+The branch variable named with `branch_env` overrides the current branch name;
+an empty value counts as unset. See the
+[`versolve::cargo` API docs](https://docs.rs/versolve/latest/versolve/cargo/)
 for full details.
+
+#### Rebuild limitations
+
+The build script reruns when the version may change, but a few changes go
+unnoticed until a file in the package changes or you run `cargo clean`:
+
+- Creating a repository around a package that was built outside one, un-ignoring
+  the directory that contains the package, or fixing a repository that Versolve
+  can't open (such as one using reftable).
+- Changes to `packed-refs` or `shallow` if the file was created without changing
+  anything under `.git/refs`. Git commands such as `git pack-refs --all`,
+  `git gc`, and shallow fetches do change `refs`, so this mostly affects other
+  tools.
+
+#### Other build information
+
+Versolve only resolves the version. For the commit hash, commit date, build
+time, or other build information, collect it in your build script or use a build
+information crate such as [vergen](https://docs.rs/vergen) or
+[shadow-rs](https://docs.rs/shadow-rs) alongside Versolve. Neither needs
+Versolve-specific support: resolve the version with Versolve and emit it as its
+own variable, as above, or pass it to the other tool wherever that tool accepts
+custom values.
+
+A version resolved from Git ends with the abbreviated commit hash, such as
+`+g1a2b3c4`, but don't rely on it as the commit identifier: fallback versions
+have no hash, an abbreviated hash isn't guaranteed to stay unique, and SemVer
+precedence ignores build metadata.
 
 ## How versions are resolved
 
@@ -232,7 +261,7 @@ For build-script integration, set your configured `branch_env` instead:
 
   ```toml
   [build-dependencies]
-  versolve = { version = "0.3", default-features = false }
+  versolve = { version = "0.4", default-features = false }
   ```
 
 - `sha256` _(off by default)_: enable experimental SHA-256 object ID support
@@ -246,6 +275,48 @@ When built from a Git checkout, Versolve embeds its own version from the
 committed repository state (never `.dirty`). If `HEAD` is detached, set
 `VERSOLVE_BUILD_BRANCH` to the branch name; otherwise the build falls back to
 the version in `Cargo.toml`.
+
+## Migrating from 0.3
+
+Version 0.4 narrows the build script integration to resolving the version.
+`versolve::build::Config` is now `versolve::cargo::Resolver`, and `emit` is
+replaced by `resolve`, which returns the version instead of setting environment
+variables. The other options (`tag_prefix`, `default_branch`, `branch_env`, and
+`strict`) work as before.
+
+Before:
+
+```rust
+versolve::build::Config::new()
+    .tag_prefix("v")
+    .emit("MYAPP_VERSION")
+    .unwrap();
+```
+
+After:
+
+```rust
+let version = versolve::cargo::Resolver::new()
+    .tag_prefix("v")
+    .resolve()
+    .unwrap();
+println!("cargo:rustc-env=MYAPP_VERSION={version}");
+```
+
+| Removed                           | Replacement                                                                                            |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `MYAPP_VERSION`                   | Print it from your build script as shown above.                                                        |
+| `MYAPP_VERSION_COMMIT_HASH`       | Collect the full commit hash separately, for example with a build information crate.                   |
+| `MYAPP_VERSION_COMMIT_SHORT_HASH` | Collect it separately. A version resolved from Git ends with an abbreviated hash, but fallbacks don't. |
+| `MYAPP_VERSION_COMMIT_DATE`       | Collect it separately, for example with a build information crate.                                     |
+| `Config::time_zone`, `TimeZone`   | None; they only applied to `MYAPP_VERSION_COMMIT_DATE`.                                                |
+
+See [Other build information](#other-build-information) for collecting the
+commit details.
+
+The `versolve --version` output now shows the full embedded version, including
+its build metadata (for example `versolve 0.4.0+g1a2b3c4`), and
+`versolve --verbose --version` no longer prints `commit-hash` and `commit-date`.
 
 ## License
 

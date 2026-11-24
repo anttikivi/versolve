@@ -8,6 +8,31 @@ and this project adheres to
 
 ## [Unreleased]
 
+Versolve now focuses on resolving versions: the build script integration returns
+the version instead of setting environment variables for the package. See the
+migration guide in the README.
+
+### Changed
+
+- **Breaking:** `versolve::build::Config` is now `versolve::cargo::Resolver`,
+  and `Config::emit(var)` is replaced by `Resolver::resolve()`, which returns
+  the version and prints only Cargo rerun instructions and warnings. Print
+  `cargo:rustc-env=<VAR>={version}` from the build script to keep embedding the
+  version. Fallback, strict mode, and the branch variable work as before.
+- `--version` now prints the full embedded version, including its build
+  metadata, such as `versolve 0.4.0+g1a2b3c4`, instead of the version without
+  build metadata followed by the commit hash and date.
+- The documentation now lists the changes that don't rerun the build script by
+  themselves.
+
+### Removed
+
+- **Breaking:** the `<VAR>_COMMIT_HASH`, `<VAR>_COMMIT_SHORT_HASH`, and
+  `<VAR>_COMMIT_DATE` variables set by `emit`, along with `Config::time_zone`
+  and `TimeZone`. Use a build information crate such as vergen or shadow-rs, or
+  collect the details in your build script.
+- The `commit-hash` and `commit-date` fields of `--verbose --version`.
+
 ## [0.3.0] - 2026-11-22
 
 ### Added

@@ -27,6 +27,24 @@
 //! When the package is outside a Git repository (such as a crates.io tarball)
 //! or version resolution fails, the version from `Cargo.toml` is used instead.
 //! See [`Resolver::resolve`] for details.
+//!
+//! # Cargo package versions
+//!
+//! The resolved version is only what the build script passes to the package.
+//! Versolve doesn't change `Cargo.toml`, so `CARGO_PKG_VERSION`, dependency
+//! resolution, and the version published to a registry still come from there.
+//!
+//! # Other build information
+//!
+//! Versolve only resolves the version. Collect other build information, such
+//! as the full commit hash or the commit date, in the build script or with a
+//! build information crate such as `vergen` or `shadow-rs`, and pass the
+//! resolved version to that tool wherever it accepts custom values.
+//!
+//! A version resolved from Git ends with an abbreviated commit hash, such as
+//! `+g1a2b3c4`, but fallback versions have none, an abbreviated hash isn't
+//! guaranteed to stay unique, and SemVer precedence ignores build metadata, so
+//! don't use it as the commit identifier.
 
 use std::{
     env,
