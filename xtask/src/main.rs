@@ -1,7 +1,8 @@
 use std::{
     env,
     ffi::OsString,
-    fs, io,
+    fs,
+    io::{self, Write},
     path::{Path, PathBuf},
     process::{self, Command, Output},
     time::{SystemTime, UNIX_EPOCH},
@@ -163,12 +164,14 @@ impl App {
             .env("CARGO_TARGET_DIR", &self.target)
             .env("APP_BUILD_LOG", &self.log)
             .env_remove("APP_BUILD_BRANCH")
-            .current_dir(&self.dir)
-            .stderr(process::Stdio::inherit());
+            .current_dir(&self.dir);
         for (key, value) in env {
             cmd.env(key, value);
         }
-        Ok(cmd.output()?)
+        // Capture stderr so that failures can be checked, but still show it.
+        let output = cmd.output()?;
+        io::stderr().write_all(&output.stderr)?;
+        Ok(output)
     }
 
     fn build_script_runs(&self) -> Result<usize> {
@@ -236,13 +239,17 @@ impl App {
         Ok(version)
     }
 
-    /// Checks that the build fails, as it should in strict mode.
-    fn check_fails(&self, step: &str) -> Result {
+    /// Checks that the build fails with an error containing `error`, as it
+    /// should in strict mode.
+    fn check_fails(&self, step: &str, error: &str) -> Result {
         eprintln!("e2e: {}: {step}: expecting the build to fail", self.name);
         let output = self.cargo_run(&[])?;
         eprintln!("e2e: {}: {step}: {}", self.name, output.status);
         if output.status.success() {
             return Err(format!("{}: {step}: expected `cargo run` to fail", self.name).into());
+        }
+        if !String::from_utf8_lossy(&output.stderr).contains(error) {
+            return Err(format!("{}: {step}: expected the error {error:?}", self.name).into());
         }
         Ok(())
     }
@@ -349,9 +356,11 @@ fn e2e() -> Result {
     app.git(&["worktree", "add", "-b", "wt", path_str(&worktree.dir)?])?;
     worktree.check("initial", Yes, Git("0.1.0-0.2.wt"), &[])?;
     worktree.check("no changes", No, Git("0.1.0-0.2.wt"), &[])?;
-    worktree.git(&["commit", "--allow-empty", "-m", "commit"])?;
+    // Distinct messages keep these empty commits on the same parent from being
+    // identical when they're made within the same second.
+    worktree.git(&["commit", "--allow-empty", "-m", "commit in worktree"])?;
     worktree.check("commit", Yes, Git("0.1.0-0.3.wt"), &[])?;
-    app.git(&["commit", "--allow-empty", "-m", "commit"])?;
+    app.git(&["commit", "--allow-empty", "-m", "commit in main worktree"])?;
     app.git(&["tag", "-a", "v2.0.0", "-m", "v2.0.0"])?;
     worktree.check("tag in the main worktree", Any, Git("0.1.0-0.3.wt"), &[])?;
     worktree.git(&["merge", "--no-ff", "-m", "merge", "main"])?;
@@ -375,8 +384,11 @@ fn e2e() -> Result {
     shallow.check("initial", Yes, Fallback, &[])?;
     shallow.check("no changes", No, Fallback, &[])?;
     let strict = BUILD_SCRIPT.replace(".resolve()", ".strict(true)\n        .resolve()");
+    if strict == BUILD_SCRIPT {
+        return Err("failed to enable strict mode in the build script".into());
+    }
     fs::write(shallow.dir.join("app/build.rs"), strict)?;
-    shallow.check_fails("strict mode")?;
+    shallow.check_fails("strict mode", "repository is a shallow clone")?;
     shallow.git(&["checkout", "--", "app/build.rs"])?;
     shallow.check("strict mode off", Yes, Fallback, &[])?;
     shallow.git(&["fetch", "--unshallow", "--no-tags"])?;

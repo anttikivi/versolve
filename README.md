@@ -97,9 +97,9 @@ resolution, and the version you publish to a registry still come from
 `resolve` uses only committed repository state (never `.dirty`). Unlike
 `versolve::Resolver::resolve`, it has build script side effects: it prints
 `cargo:rerun-if-changed` / `cargo:rerun-if-env-changed` instructions for `HEAD`,
-refs, Git config, `shallow`, `Cargo.toml`, and the branch variable, and a
-`cargo:warning` when it falls back. It doesn't set any environment variables for
-your package; that's up to your build script.
+refs, `packed-refs`, Git config, `shallow`, `Cargo.toml`, and the branch
+variable, and a `cargo:warning` when it falls back. It doesn't set any
+environment variables for your package; that's up to your build script.
 
 > [!IMPORTANT]
 > Printing any `rerun-if-*` instruction turns off Cargo's default of rerunning
@@ -132,10 +132,11 @@ unnoticed until a file in the package changes or you run `cargo clean`:
 - Creating a repository around a package that was built outside one, un-ignoring
   the directory that contains the package, or fixing a repository that Versolve
   can't open (such as one using reftable).
-- Changes to `packed-refs` or `shallow` if the file was created without changing
-  anything under `.git/refs`. Git commands such as `git pack-refs --all`,
-  `git gc`, and shallow fetches do change `refs`, so this mostly affects other
-  tools.
+- Changes to `packed-refs` if it was created without changing anything under
+  `.git/refs`. `git pack-refs --all` and `git gc` do change `refs`, so this
+  mostly affects other tools.
+- A full clone becoming shallow, which keeps the version resolved from the full
+  history.
 
 #### Other build information
 

@@ -173,10 +173,11 @@ impl Resolver {
     ///   un-ignoring the directory, or fixing the repository goes unnoticed.
     /// - `packed-refs` and `shallow` are watched only if they exist, because
     ///   Cargo reruns a build script on every build while a watched path is
-    ///   missing. Git normally changes `refs` too when it creates them (for
-    ///   example with `git pack-refs --all`, `git gc`, or a shallow fetch), but
-    ///   if a tool creates one without changing `refs`, later changes to that
-    ///   file go unnoticed until another watched path changes.
+    ///   missing. `git pack-refs --all` and `git gc` also change `refs` when
+    ///   they create `packed-refs`, but if a tool creates it without changing
+    ///   `refs`, later changes to it go unnoticed until another watched path
+    ///   changes. Likewise, a full clone becoming shallow may go unnoticed,
+    ///   which keeps the version resolved from the full history.
     ///
     /// # Errors
     ///

@@ -60,8 +60,9 @@
 //! The package can then read the version with `env!("MYAPP_VERSION")`. Unlike
 //! [`Resolver::resolve`], [`cargo::Resolver::resolve`] prints Cargo
 //! instructions so that the build script reruns when the version may change,
-//! and falls back to the version in `Cargo.toml` outside a Git repository. See
-//! the [`cargo`] module for details.
+//! and falls back to the version in `Cargo.toml` outside a Git repository or,
+//! unless in strict mode, when resolution fails. See the [`cargo`] module for
+//! details.
 //!
 //! The resolved version doesn't replace the version in `Cargo.toml`, which
 //! Cargo still uses for `CARGO_PKG_VERSION`, dependency resolution, and
