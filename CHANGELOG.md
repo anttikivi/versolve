@@ -8,6 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Changed
+
+- Lower the MSRV to 1.87.0.
+
 ## [0.4.0] - 2026-11-24
 
 Versolve now focuses on resolving versions: the build script integration returns
