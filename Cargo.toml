@@ -1,6 +1,6 @@
 [package]
 name = "versolve"
-version = "0.4.1"
+version = "0.5.0-dev"
 edition = "2024"
 rust-version = "1.87.0"
 description = "Resolve unique semantic version numbers for Git revisions"
